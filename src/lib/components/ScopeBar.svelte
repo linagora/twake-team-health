@@ -1,20 +1,26 @@
 <script lang="ts">
 	import { scope } from '$lib/client/scope.svelte';
-	import { metrics } from '$lib/client/metrics.svelte';
 	import { theme } from '$lib/client/theme.svelte';
 	import { signOut } from '@auth/sveltekit/client';
 	import * as Select from '$lib/components/ui/select';
 	import { Users, GitBranch, RefreshCw, Settings2, Power, Menu, Sun, Moon } from '@lucide/svelte';
+	import { onMount } from 'svelte';
 
-	$effect(() => {
-		theme.init();
-	});
+	onMount(() => theme.init());
 
 	let {
 		user,
 		authEnabled,
+		busy = false,
+		onRefresh,
 		onMenu
-	}: { user: { name: string; email: string }; authEnabled: boolean; onMenu?: () => void } = $props();
+	}: {
+		user: { name: string; email: string };
+		authEnabled: boolean;
+		busy?: boolean;
+		onRefresh?: () => void;
+		onMenu?: () => void;
+	} = $props();
 
 	const WINDOWS = [3, 6, 12];
 	const active = $derived(scope.activeTeam);
@@ -86,11 +92,11 @@
 			<Settings2 class="h-3.5 w-3.5" /> <span class="hidden sm:inline">Manage teams</span>
 		</a>
 		<button
-			onclick={() => scope.reload()}
-			disabled={metrics.loading}
+			onclick={() => onRefresh?.()}
+			disabled={busy}
 			class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 py-1.5 text-xs text-[var(--color-ink-800)] hover:border-[var(--color-ink-400)] disabled:opacity-50"
 		>
-			<RefreshCw class="h-3.5 w-3.5 {metrics.loading ? 'animate-spin' : ''}" /> <span class="hidden sm:inline">Refresh</span>
+			<RefreshCw class="h-3.5 w-3.5 {busy ? 'animate-spin' : ''}" /> <span class="hidden sm:inline">Refresh</span>
 		</button>
 
 		<!-- User + logout -->

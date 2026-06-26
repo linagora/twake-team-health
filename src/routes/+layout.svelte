@@ -5,12 +5,22 @@
 	import LoadingBar from '$lib/components/LoadingBar.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import { metrics, globalMetrics } from '$lib/client/metrics.svelte';
+	import { attention } from '$lib/client/attention.svelte';
+	import { flow } from '$lib/client/flow.svelte';
 	import { page } from '$app/state';
 
 	let { children, data } = $props();
 
-	// True whenever a report (team or global) is being (re)fetched.
-	const loading = $derived(metrics.loading || globalMetrics.loading);
+	// The store that backs the current route, so the loading dim, the top bar, and
+	// Refresh all act on the data actually shown (not always the team report).
+	const active = $derived.by(() => {
+		const p = page.url.pathname;
+		if (p.startsWith('/attention')) return { loading: attention.loading, refresh: () => attention.reload() };
+		if (p.startsWith('/flow')) return { loading: flow.loading, refresh: () => flow.reload() };
+		if (p.startsWith('/global')) return { loading: globalMetrics.loading, refresh: () => globalMetrics.reload() };
+		return { loading: metrics.loading, refresh: () => scope.reload() };
+	});
+	const loading = $derived(active.loading);
 
 	// Per-page browser title: "Section · team·health".
 	const pageSection = $derived.by(() => {
@@ -76,6 +86,8 @@
 		<ScopeBar
 			user={data.user}
 			authEnabled={data.authEnabled}
+			busy={loading}
+			onRefresh={active.refresh}
 			onMenu={() => (drawerOpen = true)}
 		/>
 		<LoadingBar active={loading} />

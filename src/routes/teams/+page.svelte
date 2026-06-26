@@ -160,7 +160,7 @@
 								</div>
 								<div class="relative mb-2">
 									<Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-ink-500)]" />
-									<input bind:value={memberQuery} placeholder="Search members" class="w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] py-1.5 pl-8 pr-3 text-sm focus:border-[var(--color-brand)] focus:outline-none" />
+									<input bind:value={memberQuery} placeholder="Search members" aria-label="Search members" class="w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] py-1.5 pl-8 pr-3 text-sm focus:border-[var(--color-brand)] focus:outline-none" />
 								</div>
 								<div class="h-64 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
 									{#each filteredMembers as m (m.login)}
@@ -181,7 +181,7 @@
 								</div>
 								<div class="relative mb-2">
 									<Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-ink-500)]" />
-									<input bind:value={repoQuery} placeholder="Search repositories" class="w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] py-1.5 pl-8 pr-3 text-sm focus:border-[var(--color-brand)] focus:outline-none" />
+									<input bind:value={repoQuery} placeholder="Search repositories" aria-label="Search repositories" class="w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] py-1.5 pl-8 pr-3 text-sm focus:border-[var(--color-brand)] focus:outline-none" />
 								</div>
 								<div class="h-64 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
 									{#each filteredRepos as r (repoKey(r))}

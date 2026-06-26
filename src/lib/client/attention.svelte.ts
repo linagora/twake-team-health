@@ -9,8 +9,14 @@ class AttentionStore {
 	data = $state<AttentionResult | null>(null);
 	#seq = 0;
 	#key = '';
+	#last: Repo[] | null = null;
+
+	reload(): void {
+		if (this.#last) this.load(this.#last);
+	}
 
 	async load(repos: Repo[]): Promise<void> {
+		this.#last = repos;
 		const key = repos.map((r) => `${r.owner}/${r.repo}`).sort().join(',');
 		this.#key = key;
 		const seq = ++this.#seq;

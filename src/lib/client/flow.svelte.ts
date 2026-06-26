@@ -9,8 +9,14 @@ class FlowStore {
 	data = $state<FlowResult | null>(null);
 	#seq = 0;
 	#key = '';
+	#last: { repos: Repo[]; months: number } | null = null;
+
+	reload(): void {
+		if (this.#last) this.load(this.#last.repos, this.#last.months);
+	}
 
 	async load(repos: Repo[], months: number): Promise<void> {
+		this.#last = { repos, months };
 		const key = JSON.stringify({ r: repos.map((x) => `${x.owner}/${x.repo}`).sort(), months });
 		this.#key = key;
 		const seq = ++this.#seq;

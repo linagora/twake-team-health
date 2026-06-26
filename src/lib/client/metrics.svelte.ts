@@ -20,8 +20,15 @@ class MetricsStore {
 	error = $state<string | null>(null);
 	data = $state<MetricsResult | null>(null);
 	#seq = 0;
+	#last: Selection | null = null;
+
+	/** Re-run the most recent load (used by the route-aware Refresh button). */
+	reload(): void {
+		if (this.#last) this.load(this.#last);
+	}
 
 	async load(selection: Selection): Promise<void> {
+		this.#last = selection;
 		const seq = ++this.#seq;
 		this.loading = true;
 		this.error = null;

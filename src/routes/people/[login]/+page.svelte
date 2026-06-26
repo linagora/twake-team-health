@@ -5,7 +5,7 @@
 	import { metrics } from '$lib/client/metrics.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import { fmtNum } from '$lib/utils';
-	import { Loader2, ArrowLeft, GitCommitHorizontal } from '@lucide/svelte';
+	import { Loader2, ArrowLeft, AlertCircle } from '@lucide/svelte';
 
 	const login = $derived(page.params.login ?? '');
 	const lc = (s: string) => s.toLowerCase();
@@ -49,7 +49,12 @@
 </Topbar>
 
 <div class="px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-	{#if !stats && metrics.loading}
+	{#if metrics.error}
+		<Card.Root class="p-10 text-center shadow-sm">
+			<AlertCircle class="mx-auto h-9 w-9 text-[var(--color-negative)]" />
+			<p class="mt-3 font-mono text-xs text-[var(--color-ink-600)]">{metrics.error}</p>
+		</Card.Root>
+	{:else if !stats && metrics.loading}
 		<div class="flex items-center justify-center gap-3 py-32 text-[var(--color-ink-600)]">
 			<Loader2 class="h-5 w-5 animate-spin text-[var(--color-brand)]" />
 			<span class="text-sm">Loading…</span>

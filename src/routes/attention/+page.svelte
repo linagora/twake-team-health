@@ -19,8 +19,8 @@
 
 	const REASON: Record<AttentionReason, { label: string; color: string }> = {
 		changes_requested: { label: 'Changes requested', color: 'var(--color-negative)' },
-		unreviewed: { label: 'No review', color: '#f59e0b' },
-		stale: { label: 'Stale', color: '#ef6c00' },
+		unreviewed: { label: 'No review', color: 'var(--color-warning)' },
+		stale: { label: 'Stale', color: 'var(--color-warning-strong)' },
 		aging: { label: 'Aging', color: 'var(--color-ink-500)' },
 		draft_stale: { label: 'Old draft', color: 'var(--color-ink-500)' }
 	};

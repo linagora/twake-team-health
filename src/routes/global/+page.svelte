@@ -13,7 +13,10 @@
 	let { data } = $props();
 
 	onMount(() => {
-		globalMetrics.load({ repos: data.global.repos, members: [], months: data.global.months, memberMonths: 1 });
+		// Global config is fixed, so don't refetch if it's already loaded (revisits).
+		if (!globalMetrics.data) {
+			globalMetrics.load({ repos: data.global.repos, members: [], months: data.global.months, memberMonths: 1 });
+		}
 	});
 
 	const trend = $derived<OrgMonth[]>(globalMetrics.data ? orgTrend(globalMetrics.data.repos) : []);
