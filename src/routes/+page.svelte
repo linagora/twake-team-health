@@ -174,95 +174,94 @@
 			</div>
 		</section>
 
-		<!-- Leaderboards -->
-		<section class="grid grid-cols-12 gap-8">
-			<div class="col-span-12 lg:col-span-7">
-				<div class="mb-6 flex items-baseline justify-between">
-					<div>
-						<div class="eyebrow mb-2">Most active repositories</div>
-						<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h3>
-					</div>
-					<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
-						View all <ArrowUpRight class="h-3 w-3" />
-					</a>
+		<!-- Most active repositories -->
+		<section class="mb-14">
+			<div class="mb-6 flex items-baseline justify-between">
+				<div>
+					<div class="eyebrow mb-2">Most active repositories</div>
+					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h3>
 				</div>
-				<Card.Root class="gap-0 py-0 overflow-hidden shadow-sm">
-					{#each topRepos as [repo, m], i (repo)}
-						<div class="group flex items-center gap-5 px-5 py-4 {i !== 0 ? 'border-t border-[var(--color-ink-200)]' : ''}">
-							<span class="font-mono tabular text-xs text-[var(--color-ink-500)] w-6">{String(i + 1).padStart(2, '0')}</span>
-							<div class="flex-1 min-w-0">
-								<div class="font-display text-base text-[var(--color-ink-950)] truncate">{repo}</div>
-								<div class="mt-0.5 font-mono text-[11px] text-[var(--color-ink-600)]">{m.created} created · {m.bugs} {m.bugs === 1 ? 'bug' : 'bugs'}</div>
-							</div>
-							<div class="text-right">
-								<div class="font-display tabular text-2xl leading-none text-[var(--color-ink-950)]">{m.merged}</div>
-								<div class="eyebrow mt-1.5">merged</div>
-							</div>
+				<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
+					View all <ArrowUpRight class="h-3 w-3" />
+				</a>
+			</div>
+			<Card.Root class="gap-0 py-0 overflow-hidden shadow-sm">
+				{#each topRepos as [repo, m], i (repo)}
+					<div class="group flex items-center gap-5 px-5 py-4 {i !== 0 ? 'border-t border-[var(--color-ink-200)]' : ''}">
+						<span class="font-mono tabular text-xs text-[var(--color-ink-500)] w-6">{String(i + 1).padStart(2, '0')}</span>
+						<div class="flex-1 min-w-0">
+							<div class="font-display text-base text-[var(--color-ink-950)] truncate">{repo}</div>
+							<div class="mt-0.5 font-mono text-[11px] text-[var(--color-ink-600)]">{m.created} created · {m.bugs} {m.bugs === 1 ? 'bug' : 'bugs'}</div>
 						</div>
+						<div class="text-right">
+							<div class="font-display tabular text-2xl leading-none text-[var(--color-ink-950)]">{m.merged}</div>
+							<div class="eyebrow mt-1.5">merged</div>
+						</div>
+					</div>
+				{:else}
+					<div class="px-5 py-10 text-center text-sm text-[var(--color-ink-600)]">No data</div>
+				{/each}
+			</Card.Root>
+		</section>
+
+		<!-- Contributor leaderboards, side by side -->
+		<section class="grid grid-cols-1 gap-8 lg:grid-cols-2">
+			<div>
+				<div class="mb-6">
+					<div class="eyebrow mb-2">Commit leaderboard</div>
+					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's pushing the code</h3>
+				</div>
+				<Card.Root class="p-6 shadow-sm">
+					{#if topAuthors.length === 0}
+						<div class="py-8 text-center text-sm text-[var(--color-ink-600)]">No commit data</div>
 					{:else}
-						<div class="px-5 py-10 text-center text-sm text-[var(--color-ink-600)]">No data</div>
-					{/each}
+						{@const max = Math.max(...topAuthors.map(([, n]) => n), 1)}
+						<ul class="space-y-3.5">
+							{#each topAuthors as [name, count] (name)}
+								<li>
+									<div class="flex items-baseline justify-between text-xs mb-1.5">
+										<span class="text-[var(--color-ink-900)]">{displayName(name)}</span>
+										<span class="font-mono tabular text-[var(--color-ink-600)]">{fmtNum(count)}</span>
+									</div>
+									<div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-ink-200)]">
+										<div class="h-full rounded-full bg-[var(--color-brand)]" style:width={`${(count / max) * 100}%`}></div>
+									</div>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</Card.Root>
 			</div>
 
-			<div class="col-span-12 lg:col-span-5 space-y-10">
-				<div>
-					<div class="mb-6">
-						<div class="eyebrow mb-2">Commit leaderboard</div>
-						<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's pushing the code</h3>
-					</div>
-					<Card.Root class="p-6 shadow-sm">
-						{#if topAuthors.length === 0}
-							<div class="py-8 text-center text-sm text-[var(--color-ink-600)]">No commit data</div>
-						{:else}
-							{@const max = Math.max(...topAuthors.map(([, n]) => n), 1)}
-							<ul class="space-y-3.5">
-								{#each topAuthors as [name, count] (name)}
-									<li>
-										<div class="flex items-baseline justify-between text-xs mb-1.5">
-											<span class="text-[var(--color-ink-900)]">{displayName(name)}</span>
-											<span class="font-mono tabular text-[var(--color-ink-600)]">{fmtNum(count)}</span>
-										</div>
-										<div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-ink-200)]">
-											<div class="h-full rounded-full bg-[var(--color-brand)]" style:width={`${(count / max) * 100}%`}></div>
-										</div>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					</Card.Root>
+			<div>
+				<div class="mb-6">
+					<div class="eyebrow mb-2">Lines of code · merged PRs</div>
+					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's changing the most</h3>
 				</div>
-
-				<div>
-					<div class="mb-6">
-						<div class="eyebrow mb-2">Lines of code · merged PRs</div>
-						<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's changing the most</h3>
-					</div>
-					<Card.Root class="p-6 shadow-sm">
-						{#if topLines.length === 0}
-							<div class="py-8 text-center text-sm text-[var(--color-ink-600)]">No line data</div>
-						{:else}
-							{@const max = Math.max(...topLines.map((l) => l.total), 1)}
-							<ul class="space-y-3.5">
-								{#each topLines as l (l.author)}
-									<li>
-										<div class="flex items-baseline justify-between gap-3 text-xs mb-1.5">
-											<span class="truncate text-[var(--color-ink-900)]">{displayName(l.author)}</span>
-											<span class="font-mono tabular shrink-0">
-												<span class="text-[var(--color-positive)]">+{fmtNum(l.additions)}</span>
-												<span class="text-[var(--color-negative)]">−{fmtNum(l.deletions)}</span>
-											</span>
-										</div>
-										<div class="flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-ink-200)]">
-											<div class="h-full bg-[var(--color-positive)]" style:width={`${(l.additions / max) * 100}%`} title={`${fmtNum(l.additions)} added`}></div>
-											<div class="h-full bg-[var(--color-negative)]" style:width={`${(l.deletions / max) * 100}%`} title={`${fmtNum(l.deletions)} removed`}></div>
-										</div>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					</Card.Root>
-				</div>
+				<Card.Root class="p-6 shadow-sm">
+					{#if topLines.length === 0}
+						<div class="py-8 text-center text-sm text-[var(--color-ink-600)]">No line data</div>
+					{:else}
+						{@const max = Math.max(...topLines.map((l) => l.total), 1)}
+						<ul class="space-y-3.5">
+							{#each topLines as l (l.author)}
+								<li>
+									<div class="flex items-baseline justify-between gap-3 text-xs mb-1.5">
+										<span class="truncate text-[var(--color-ink-900)]">{displayName(l.author)}</span>
+										<span class="font-mono tabular shrink-0">
+											<span class="text-[var(--color-positive)]">+{fmtNum(l.additions)}</span>
+											<span class="text-[var(--color-negative)]">−{fmtNum(l.deletions)}</span>
+										</span>
+									</div>
+									<div class="flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-ink-200)]">
+										<div class="h-full bg-[var(--color-positive)]" style:width={`${(l.additions / max) * 100}%`} title={`${fmtNum(l.additions)} added`}></div>
+										<div class="h-full bg-[var(--color-negative)]" style:width={`${(l.deletions / max) * 100}%`} title={`${fmtNum(l.deletions)} removed`}></div>
+									</div>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</Card.Root>
 			</div>
 		</section>
 
