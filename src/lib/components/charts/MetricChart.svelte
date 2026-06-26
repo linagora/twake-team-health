@@ -4,7 +4,7 @@
 	import * as Chart from '$lib/components/ui/chart';
 	import type { ChartConfig } from '$lib/components/ui/chart';
 	import { fmtMonth } from '$lib/utils';
-	import { isMonthKey } from '$lib/months';
+	import { isMonthKey, monthKeyOf } from '$lib/months';
 
 	type Series = { key: string; label: string; color: string };
 
@@ -55,6 +55,12 @@
 	);
 	const lcSeries = $derived(
 		series.map((s) => ({ key: s.key, label: s.label, color: `var(--color-${s.key})` }))
+	);
+
+	// The last point is the in-progress current month when the x-axis is months and
+	// the final key matches this month; flag it so its partial bar isn't misread.
+	const partialMonth = $derived(
+		data.length > 0 && isMonthKey(data[data.length - 1]?.[x]) && data[data.length - 1]?.[x] === monthKeyOf()
 	);
 
 	const tickLabel = { class: 'fill-[var(--color-ink-600)] text-[10px]' };
@@ -129,4 +135,10 @@
 			</LineChart>
 		{/if}
 	</Chart.Container>
+
+	{#if partialMonth}
+		<p class="text-[10px] text-[var(--color-ink-500)]">
+			{fmtMonth(monthKeyOf())} is still in progress
+		</p>
+	{/if}
 </div>
