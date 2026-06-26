@@ -30,6 +30,14 @@ export function parseRepoKey(key: string): Repo {
 	return { owner, repo: rest.join('/') };
 }
 
+/** Decode a comma-separated query-param value into a trimmed, non-empty list. */
+export function parseList(s: string | null): string[] {
+	return (s ?? '')
+		.split(',')
+		.map((x) => x.trim())
+		.filter(Boolean);
+}
+
 /** Custom teams the user has saved (excludes built-ins). */
 export function loadTeams(): Team[] {
 	if (typeof localStorage === 'undefined') return [];

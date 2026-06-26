@@ -2,8 +2,6 @@
 // Built-in presets come from server config. Custom teams are persisted per-user in
 // Postgres when configured (private to the user), else in localStorage for dev.
 // The active team + window is always a per-browser preference (localStorage).
-import { page } from '$app/state';
-import { replaceState } from '$app/navigation';
 import {
 	loadTeams,
 	saveTeams,
@@ -13,8 +11,13 @@ import {
 	DEFAULT_TEAM_ID,
 	type Team
 } from './selection';
+import { replaceSearchParams } from './url';
 import { metrics, selectionFor, redirectToSignIn } from './metrics.svelte';
 import type { Member, Repo } from '$lib/server/github/types';
+
+// A shared/bookmarked link can carry any value; cap it so a stray ?window=1e9
+// can't drive an enormous metrics query.
+const MAX_WINDOW = 60;
 
 type TeamInput = { name: string; members: Member[]; repos: Repo[] };
 
@@ -61,13 +64,14 @@ class ScopeStore {
 		// Precedence: URL query param (a shared/bookmarked link) > localStorage > config.
 		const urlTeam = url?.searchParams.get('team');
 		const urlMonths = Number(url?.searchParams.get('window'));
+		const validUrlMonths = Number.isInteger(urlMonths) && urlMonths > 0 && urlMonths <= MAX_WINDOW;
 		this.activeTeamId =
 			urlTeam && this.teams.some((t) => t.id === urlTeam)
 				? urlTeam
 				: this.teams.some((t) => t.id === s.teamId)
 					? s.teamId
 					: fallbackId;
-		this.months = urlMonths > 0 ? urlMonths : s.months;
+		this.months = validUrlMonths ? urlMonths : s.months;
 		this.memberMonths = Math.min(s.memberMonths, this.months);
 		this.#persistPrefs();
 		this.syncUrl();
@@ -82,21 +86,11 @@ class ScopeStore {
 	 * so the current view is a shareable, bookmarkable link. Only writes when the
 	 * search actually changes, so it is safe to call from a navigation effect. */
 	syncUrl(): void {
-		if (typeof window === 'undefined' || !this.initialized) return;
-		// Read the live location, not page.url: another writer (e.g. the Breakdown
-		// page) may have just applied params this frame, and page.url lags behind
-		// replaceState within a frame, which would clobber those params.
-		const url = new URL(window.location.href);
-		url.searchParams.set('team', this.activeTeamId);
-		url.searchParams.set('window', String(this.months));
-		if (url.search === window.location.search) return;
-		try {
-			replaceState(url, page.state);
-		} catch {
-			// Called before the client router is initialized (during hydration). Retry
-			// on the next frame, by which point the router is ready.
-			requestAnimationFrame(() => this.syncUrl());
-		}
+		if (!this.initialized) return;
+		replaceSearchParams((params) => {
+			params.set('team', this.activeTeamId);
+			params.set('window', String(this.months));
+		});
 	}
 	#persistLocalTeams(): void {
 		if (!this.persisted) saveTeams(this.teams);
