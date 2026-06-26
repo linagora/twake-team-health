@@ -39,6 +39,11 @@ const LOCK_TTL_MS = Number(env.CACHE_LOCK_TTL_MS ?? 600_000);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class RedisCache<V> implements Cache<V> {
+	// Same-process in-flight de-dup: the Redis lock collapses work across replicas,
+	// but N concurrent callers in THIS process should share one promise rather than
+	// each poll Redis independently.
+	#inflight = new Map<string, Promise<V>>();
+
 	constructor(
 		private readonly prefix: string,
 		private readonly ttlMs: number
@@ -72,6 +77,15 @@ class RedisCache<V> implements Cache<V> {
 		const cached = await this.get(key);
 		if (cached !== undefined) return cached;
 
+		const pending = this.#inflight.get(key);
+		if (pending) return pending;
+
+		const promise = this.#computeWithLock(key, compute).finally(() => this.#inflight.delete(key));
+		this.#inflight.set(key, promise);
+		return promise;
+	}
+
+	async #computeWithLock(key: string, compute: () => Promise<V>): Promise<V> {
 		const redis = getRedis();
 		const lockKey = this.#lock(key);
 		// Unique token so we only release a lock we still own (fencing): if compute
