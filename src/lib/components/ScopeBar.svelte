@@ -3,10 +3,9 @@
 	import { theme } from '$lib/client/theme.svelte';
 	import { signOut } from '@auth/sveltekit/client';
 	import * as Select from '$lib/components/ui/select';
+	import MonthRangePicker from '$lib/components/MonthRangePicker.svelte';
 	import { Users, GitBranch, RefreshCw, Settings2, Power, Menu, Sun, Moon } from '@lucide/svelte';
 	import { onMount } from 'svelte';
-	import { fmtMonth } from '$lib/utils';
-	import { recentMonthKeys } from '$lib/months';
 
 	onMount(() => theme.init());
 
@@ -24,7 +23,6 @@
 		onMenu?: () => void;
 	} = $props();
 
-	const MONTH_OPTIONS = recentMonthKeys(24); // last 24 months, ascending "YYYY-MM"
 	const active = $derived(scope.activeTeam);
 	const initials = $derived(
 		(user?.name || user?.email || '?')
@@ -58,19 +56,11 @@
 	</Select.Root>
 
 	<!-- Range picker: any From → To window, at month granularity -->
-	{#snippet monthPicker(value: string, onChange: (v: string) => void)}
-		<Select.Root type="single" {value} onValueChange={(v) => v && onChange(v)}>
-			<Select.Trigger class="h-8 bg-[var(--color-card)]">{fmtMonth(value)}</Select.Trigger>
-			<Select.Content>
-				{#each MONTH_OPTIONS as m (m)}<Select.Item value={m} label={fmtMonth(m)}>{fmtMonth(m)}</Select.Item>{/each}
-			</Select.Content>
-		</Select.Root>
-	{/snippet}
-	<div class="flex items-center gap-1.5">
-		{@render monthPicker(scope.rangeFrom, (v) => scope.setRange(v, scope.rangeTo))}
-		<span class="text-[var(--color-ink-500)]">→</span>
-		{@render monthPicker(scope.rangeTo, (v) => scope.setRange(scope.rangeFrom, v))}
-	</div>
+	<MonthRangePicker
+		from={scope.rangeFrom}
+		to={scope.rangeTo}
+		onChange={(f, t) => scope.setRange(f, t)}
+	/>
 
 	<div class="hidden items-center gap-4 text-xs text-[var(--color-ink-600)] lg:flex">
 		<span class="inline-flex items-center gap-1.5">
