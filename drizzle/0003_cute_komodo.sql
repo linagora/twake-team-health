@@ -1,0 +1,1 @@
+CREATE INDEX "review_repo_month_lookup_idx" ON "review_repo_month" USING btree ("owner","repo","month");

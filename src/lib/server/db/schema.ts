@@ -73,7 +73,12 @@ export const reviewRepoMonth = pgTable(
 		reviews: integer('reviews').notNull(),
 		comments: integer('comments').notNull()
 	},
-	(t) => [primaryKey({ columns: [t.reviewer, t.owner, t.repo, t.month] })]
+	// Reads filter by (owner, repo, month) with no reviewer predicate, so the
+	// reviewer-leading PK can't serve them; this index avoids a full table scan.
+	(t) => [
+		primaryKey({ columns: [t.reviewer, t.owner, t.repo, t.month] }),
+		index('review_repo_month_lookup_idx').on(t.owner, t.repo, t.month)
+	]
 );
 
 // ---------------------------------------------------------------------------

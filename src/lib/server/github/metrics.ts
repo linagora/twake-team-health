@@ -191,9 +191,12 @@ function issueAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 }
 
 function stockAliasBlock(owner: string, repo: string, m: Month, i: number): string {
-	const d = monthEnd(m);
-	const wDate = new Date(Date.parse(monthEnd(m)) - 7 * DAY_MS);
-	const w = wDate.toISOString().slice(0, 10);
+	// Snapshot "as of" the month end, but never a future date: for the in-progress
+	// month, clamp to today so open/stale counts aren't measured against the future.
+	const today = new Date().toISOString().slice(0, 10);
+	const end = monthEnd(m);
+	const d = end > today ? today : end;
+	const w = new Date(Date.parse(d) - 7 * DAY_MS).toISOString().slice(0, 10);
 	const r = (q: string, alias: string) =>
 		`${alias}_${i}: search(query: "repo:${owner}/${repo} ${q}", type: ISSUE, first: 1) { issueCount }`;
 	return [
@@ -221,13 +224,18 @@ async function fetchRepoSeries(gql: GraphQL, { owner, repo }: Repo, months: Mont
 		fetchReleases(gql, owner, repo, months)
 	]);
 
+	// GitHub can return a 200 with partial data (a per-field resource limit or an
+	// inaccessible repo nulls individual aliases); default missing aliases to empty
+	// so one bad field doesn't 500 the whole report.
+	const emptySearch = { issueCount: 0, nodes: [] };
 	return months.map((m, i) => {
-		const pr = prStatsForMonth(prData[`created_${i}`], prData[`merged_${i}`].issueCount, prData[`closed_${i}`].issueCount);
-		const iss = issueStatsForMonth(issueData[`opened_${i}`], issueData[`closed_${i}`].issueCount);
-		const issuesOpen = Math.max(0, stockData[`i_open_${i}`].issueCount - stockData[`i_closed_${i}`].issueCount);
-		const bugsOpen = Math.max(0, stockData[`b_open_${i}`].issueCount - stockData[`b_closed_${i}`].issueCount);
-		const prsOpen = Math.max(0, stockData[`p_open_${i}`].issueCount - stockData[`p_closed_${i}`].issueCount);
-		const prsStale = Math.max(0, stockData[`s_open_${i}`].issueCount - stockData[`s_closed_${i}`].issueCount);
+		const count = (alias: string) => stockData[alias]?.issueCount ?? 0;
+		const pr = prStatsForMonth(prData[`created_${i}`] ?? emptySearch, prData[`merged_${i}`]?.issueCount ?? 0, prData[`closed_${i}`]?.issueCount ?? 0);
+		const iss = issueStatsForMonth(issueData[`opened_${i}`] ?? emptySearch, issueData[`closed_${i}`]?.issueCount ?? 0);
+		const issuesOpen = Math.max(0, count(`i_open_${i}`) - count(`i_closed_${i}`));
+		const bugsOpen = Math.max(0, count(`b_open_${i}`) - count(`b_closed_${i}`));
+		const prsOpen = Math.max(0, count(`p_open_${i}`) - count(`p_closed_${i}`));
+		const prsStale = Math.max(0, count(`s_open_${i}`) - count(`s_closed_${i}`));
 		return {
 			owner,
 			repo,
@@ -360,50 +368,76 @@ export async function fetchMemberRepoMonthRows(
 		return r;
 	};
 
-	for (const m of months) {
-		const month = monthKey(m);
-		const startMs = Date.parse(monthStart(m) + 'T00:00:00Z');
-		const endMs = Date.parse(monthEnd(m) + 'T23:59:59.999Z');
+	// Member lookup maps (built once) so commit attribution is a single O(commits)
+	// pass per repo/month instead of O(members x commits) re-scans.
+	const byLogin = new Map(members.map((mm) => [mm.login.toLowerCase(), mm.login]));
+	const byEmail = new Map(members.filter((mm) => mm.email).map((mm) => [mm.email!.toLowerCase(), mm.login]));
+	const matchedMembers = (author: CommitNode['author']): string[] => {
+		if (!author) return [];
+		const out = new Set<string>();
+		const viaLogin = author.user && byLogin.get(author.user.login.toLowerCase());
+		if (viaLogin) out.add(viaLogin);
+		const viaEmail = author.email && byEmail.get(author.email.toLowerCase());
+		if (viaEmail) out.add(viaEmail);
+		return [...out];
+	};
 
-		// Commits: one shared fetch per month, counted per member per repo.
-		const commitData = await fetchCommitData(gql, repos, m);
-		repos.forEach(({ owner, repo }, i) => {
-			const prCommits: CommitNode[] = (commitData[`pr${i}`]?.nodes ?? []).flatMap(
-				(pr: any) => pr.commits.nodes.map((c: any) => c.commit)
-			);
-			const mainCommits: CommitNode[] = commitData[`main${i}`]?.defaultBranchRef?.target?.history?.nodes ?? [];
-			for (const member of members) {
-				const n = commitShasForMember(prCommits, mainCommits, member, startMs, endMs).size;
-				if (n) row(member.login, owner, repo, month).commits += n;
-			}
-		});
-	}
+	// Commits: fetch every month in parallel (bounded by the GraphQL semaphore),
+	// then attribute each unique SHA to the matching member(s) in one pass.
+	const commitWork = Promise.all(
+		months.map(async (m) => {
+			const month = monthKey(m);
+			const startMs = Date.parse(monthStart(m) + 'T00:00:00Z');
+			const endMs = Date.parse(monthEnd(m) + 'T23:59:59.999Z');
+			const commitData = await fetchCommitData(gql, repos, m);
+			repos.forEach(({ owner, repo }, i) => {
+				const prCommits: CommitNode[] = (commitData[`pr${i}`]?.nodes ?? []).flatMap(
+					(pr: any) => pr.commits.nodes.map((c: any) => c.commit)
+				);
+				const mainCommits: CommitNode[] = commitData[`main${i}`]?.defaultBranchRef?.target?.history?.nodes ?? [];
+				const shas = new Map<string, Set<string>>(); // member login -> unique SHAs
+				const add = (login: string, oid: string) => {
+					let s = shas.get(login);
+					if (!s) shas.set(login, (s = new Set()));
+					s.add(oid);
+				};
+				for (const c of prCommits) {
+					const t = Date.parse(c.committedDate);
+					if (t < startMs || t > endMs) continue;
+					for (const login of matchedMembers(c.author)) add(login, c.oid);
+				}
+				for (const c of mainCommits) for (const login of matchedMembers(c.author)) add(login, c.oid);
+				for (const [login, set] of shas) row(login, owner, repo, month).commits += set.size;
+			});
+		})
+	);
 
-	// Merged PRs by author, per repo per month (count members only, case-insensitive
-	// login match mapped back to our canonical member login).
-	const canonByLower = new Map(members.map((mm) => [mm.login.toLowerCase(), mm.login]));
-	for (const { owner, repo } of repos) {
-		const blocks = months.map((m, i) => {
-			const s = monthStart(m);
-			const e = monthEnd(m);
-			return `m_${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 100) {
+	// Merged PRs by author, per repo, all repos in parallel.
+	const mergedWork = Promise.all(
+		repos.map(async ({ owner, repo }) => {
+			const blocks = months.map((m, i) => {
+				const s = monthStart(m);
+				const e = monthEnd(m);
+				return `m_${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 100) {
         nodes { ... on PullRequest { author { login } additions deletions } }
       }`;
-		});
-		const data = await runChunkedAliases(gql, blocks);
-		months.forEach((m, i) => {
-			for (const pr of data[`m_${i}`].nodes) {
-				const canon = pr.author?.login && canonByLower.get(pr.author.login.toLowerCase());
-				if (canon) {
-					const r = row(canon, owner, repo, monthKey(m));
-					r.mergedPrs += 1;
-					r.additions += pr.additions ?? 0;
-					r.deletions += pr.deletions ?? 0;
+			});
+			const data = await runChunkedAliases(gql, blocks);
+			months.forEach((m, i) => {
+				for (const pr of data[`m_${i}`]?.nodes ?? []) {
+					const canon = pr.author?.login && byLogin.get(pr.author.login.toLowerCase());
+					if (canon) {
+						const r = row(canon, owner, repo, monthKey(m));
+						r.mergedPrs += 1;
+						r.additions += pr.additions ?? 0;
+						r.deletions += pr.deletions ?? 0;
+					}
 				}
-			}
-		});
-	}
+			});
+		})
+	);
 
+	await Promise.all([commitWork, mergedWork]);
 	return [...acc.values()].filter((r) => r.commits > 0 || r.mergedPrs > 0);
 }
 
@@ -411,12 +445,13 @@ export async function fetchMemberRepoMonthRows(
 export async function fetchReviewRepoMonthRows(gql: GraphQL, repos: Repo[], months: Month[]): Promise<ReviewRepoMonthRow[]> {
 	if (!months.length || !repos.length) return [];
 	const out: ReviewRepoMonthRow[] = [];
-	for (const m of months) {
-		const month = monthKey(m);
-		const startMs = Date.parse(monthStart(m) + 'T00:00:00Z');
-		const endMs = Date.parse(monthEnd(m) + 'T23:59:59.999Z');
-		const blocks = repos.map(
-			({ owner, repo }, i) => `
+	await Promise.all(
+		months.map(async (m) => {
+			const month = monthKey(m);
+			const startMs = Date.parse(monthStart(m) + 'T00:00:00Z');
+			const endMs = Date.parse(monthEnd(m) + 'T23:59:59.999Z');
+			const blocks = repos.map(
+				({ owner, repo }, i) => `
       r${i}: search(query: "repo:${owner}/${repo} type:pr updated:${monthStart(m)}..${monthEnd(m)}", type: ISSUE, first: 100) {
         nodes { ... on PullRequest {
           author { login }
@@ -424,13 +459,14 @@ export async function fetchReviewRepoMonthRows(gql: GraphQL, repos: Repo[], mont
           comments(first: 100) { nodes { author { login } createdAt } }
         } }
       }`
-		);
-		const data = await runChunkedAliases(gql, blocks);
-		repos.forEach(({ owner, repo }, i) => {
-			const counts = reviewCountsFromNodes(data[`r${i}`].nodes, startMs, endMs);
-			for (const [reviewer, v] of counts) out.push({ reviewer, owner, repo, month, reviews: v.reviews, comments: v.comments });
-		});
-	}
+			);
+			const data = await runChunkedAliases(gql, blocks);
+			repos.forEach(({ owner, repo }, i) => {
+				const counts = reviewCountsFromNodes(data[`r${i}`]?.nodes ?? [], startMs, endMs);
+				for (const [reviewer, v] of counts) out.push({ reviewer, owner, repo, month, reviews: v.reviews, comments: v.comments });
+			});
+		})
+	);
 	return out;
 }
 
@@ -482,42 +518,44 @@ export async function fetchOpenPullRequests(gql: GraphQL, repos: Repo[]): Promis
 export async function fetchPrFlow(gql: GraphQL, repos: Repo[], months: Month[]): Promise<PrFlow[]> {
 	if (!months.length || !repos.length) return [];
 	const out: PrFlow[] = [];
-	for (const m of months) {
-		const month = monthKey(m);
-		const s = monthStart(m);
-		const e = monthEnd(m);
-		const blocks = repos.map(
-			({ owner, repo }, i) => `
+	await Promise.all(
+		months.map(async (m) => {
+			const month = monthKey(m);
+			const s = monthStart(m);
+			const e = monthEnd(m);
+			const blocks = repos.map(
+				({ owner, repo }, i) => `
       f${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 100) {
         nodes { ... on PullRequest {
           createdAt mergedAt
           reviews(first: 30) { nodes { submittedAt state author { login __typename } } }
         } }
       }`
-		);
-		const data = await runChunkedAliases(gql, blocks, 2);
-		repos.forEach(({ owner, repo }, i) => {
-			for (const pr of data[`f${i}`]?.nodes ?? []) {
-				if (!pr?.createdAt || !pr?.mergedAt) continue;
-				// Human reviews only: AI/bot reviewers (CodeRabbit, CodeScene) review
-				// instantly and would skew latency + bury who's actually reviewing.
-				const reviewNodes: any[] = (pr.reviews?.nodes ?? []).filter(
-					(r: any) => r?.submittedAt && r.author?.login && r.author?.__typename !== 'Bot'
-				);
-				const times = reviewNodes.map((r) => r.submittedAt).sort();
-				const approvals = reviewNodes.filter((r) => r.state === 'APPROVED').map((r) => r.submittedAt).sort();
-				const reviewers = [...new Set(reviewNodes.map((r) => r.author?.login).filter(Boolean))] as string[];
-				out.push({
-					repo: `${owner}/${repo}`,
-					month,
-					createdAt: pr.createdAt,
-					mergedAt: pr.mergedAt,
-					firstReviewAt: times[0] ?? null,
-					approvedAt: approvals[0] ?? null,
-					reviewers
-				});
-			}
-		});
-	}
+			);
+			const data = await runChunkedAliases(gql, blocks, 2);
+			repos.forEach(({ owner, repo }, i) => {
+				for (const pr of data[`f${i}`]?.nodes ?? []) {
+					if (!pr?.createdAt || !pr?.mergedAt) continue;
+					// Human reviews only: AI/bot reviewers (CodeRabbit, CodeScene) review
+					// instantly and would skew latency + bury who's actually reviewing.
+					const reviewNodes: any[] = (pr.reviews?.nodes ?? []).filter(
+						(r: any) => r?.submittedAt && r.author?.login && r.author?.__typename !== 'Bot'
+					);
+					const times = reviewNodes.map((r) => r.submittedAt).sort();
+					const approvals = reviewNodes.filter((r) => r.state === 'APPROVED').map((r) => r.submittedAt).sort();
+					const reviewers = [...new Set(reviewNodes.map((r) => r.author?.login).filter(Boolean))] as string[];
+					out.push({
+						repo: `${owner}/${repo}`,
+						month,
+						createdAt: pr.createdAt,
+						mergedAt: pr.mergedAt,
+						firstReviewAt: times[0] ?? null,
+						approvedAt: approvals[0] ?? null,
+						reviewers
+					});
+				}
+			});
+		})
+	);
 	return out;
 }

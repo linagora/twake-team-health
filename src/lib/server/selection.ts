@@ -5,6 +5,9 @@ import { allowedOrgs } from './discovery';
 const MAX_REPOS = 40;
 const MAX_MEMBERS = 60;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
+// Coerce to a finite number, else the default (a non-numeric `months` must not
+// become NaN and flow into lastNMonths, which would yield an empty report).
+const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 /** Validate and normalize an untrusted selection payload. Repos are sanitized
  * against GitHub identifier rules (injection guard) and restricted to the
@@ -22,8 +25,8 @@ export function parseSelection(body: unknown): Selection {
 	return {
 		repos,
 		members,
-		months: clamp(Number(b.months ?? 12), 1, 24),
-		memberMonths: clamp(Number(b.memberMonths ?? 3), 1, 12)
+		months: clamp(num(b.months, 12), 1, 24),
+		memberMonths: clamp(num(b.memberMonths, 3), 1, 12)
 	};
 }
 

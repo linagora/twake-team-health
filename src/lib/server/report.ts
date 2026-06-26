@@ -34,8 +34,12 @@ export async function getReport(
 		return assembleMetrics({ repoRows, memberRows, reviewRows }, selection.members, now.getTime());
 	}
 
-	const { repoRows, reviewRows } = await resolveRepoAndReview(gql, selection.repos, months, currentKey);
-	const memberRows = await resolveMembers(gql, selection.repos, selection.members, memberMonths, currentKey);
+	// Repo/review and member resolution are independent; run them together so a cold
+	// fetch saturates the GraphQL concurrency pool instead of draining between phases.
+	const [{ repoRows, reviewRows }, memberRows] = await Promise.all([
+		resolveRepoAndReview(gql, selection.repos, months, currentKey),
+		resolveMembers(gql, selection.repos, selection.members, memberMonths, currentKey)
+	]);
 	// Reviews are member activity, so scope them to the member window — matching the
 	// no-DB path (which fetches reviews for memberMonths only).
 	const memberMonthKeys = new Set(memberMonths.map(monthKey));

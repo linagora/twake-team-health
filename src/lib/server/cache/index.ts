@@ -124,7 +124,10 @@ class RedisCache<V> implements Cache<V> {
 }
 
 export function createCache<V>(name: string, ttlMs: number): Cache<V> {
-	return env.REDIS_URL ? new RedisCache<V>(name, ttlMs) : new MemoryCache<V>(ttlMs);
+	// Guard against a non-numeric env-derived TTL (NaN would make entries expire
+	// immediately or never, depending on the backend's comparisons).
+	const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : 20 * 60 * 1000;
+	return env.REDIS_URL ? new RedisCache<V>(name, ttl) : new MemoryCache<V>(ttl);
 }
 
 export const cacheBackend = env.REDIS_URL ? 'redis' : 'memory';

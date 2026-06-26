@@ -2,7 +2,10 @@ import { env } from '$env/dynamic/private';
 
 const ENDPOINT = 'https://api.github.com/graphql';
 const RETRY_DELAYS_MS = [0, 1000, 3000, 8000];
-const MAX_CONCURRENCY = Number(env.GITHUB_MAX_CONCURRENCY ?? 4);
+// Shared cap on in-flight GraphQL calls (protects the read-only token from
+// secondary rate limits). `|| 8` guards against a non-numeric env value, which
+// would otherwise be NaN and deadlock acquire().
+const MAX_CONCURRENCY = Number(env.GITHUB_MAX_CONCURRENCY) || 8;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

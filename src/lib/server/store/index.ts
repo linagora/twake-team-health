@@ -6,6 +6,14 @@ import type { MemberRepoMonthRow, ReviewRepoMonthRow } from './assemble';
 
 const uniq = <T>(xs: T[]) => [...new Set(xs)];
 const repoSet = (repos: Repo[]) => new Set(repos.map((r) => `${r.owner}/${r.repo}`));
+// Postgres caps a statement at 65535 bind parameters; a big team's member grid
+// (members x repos x months) can exceed that, so inserts are batched. Sizes leave
+// headroom for each table's column count.
+const chunk = <T>(xs: T[], n: number): T[][] => {
+	const out: T[][] = [];
+	for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+	return out;
+};
 // On-conflict updates copy from the row we tried to insert ("excluded").
 const sqlExcluded = (col: string) => sql.raw(`excluded.${col}`);
 
@@ -27,14 +35,15 @@ export async function getRepoMonths(repos: Repo[], months: string[]): Promise<Re
 }
 
 export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
-	if (!rows.length) return;
-	await db()
-		.insert(repoMonth)
-		.values(rows)
-		.onConflictDoUpdate({
-			target: [repoMonth.owner, repoMonth.repo, repoMonth.month],
-			set: repoMonthConflictSet()
-		});
+	for (const batch of chunk(rows, 2000)) {
+		await db()
+			.insert(repoMonth)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [repoMonth.owner, repoMonth.repo, repoMonth.month],
+				set: repoMonthConflictSet()
+			});
+	}
 }
 
 // --- member_repo_month ---
@@ -60,19 +69,20 @@ export async function getMemberRepoMonths(
 }
 
 export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promise<void> {
-	if (!rows.length) return;
-	await db()
-		.insert(memberRepoMonth)
-		.values(rows)
-		.onConflictDoUpdate({
-			target: [memberRepoMonth.login, memberRepoMonth.owner, memberRepoMonth.repo, memberRepoMonth.month],
-			set: {
-				commits: sqlExcluded('commits'),
-				mergedPrs: sqlExcluded('merged_prs'),
-				additions: sqlExcluded('additions'),
-				deletions: sqlExcluded('deletions')
-			}
-		});
+	for (const batch of chunk(rows, 5000)) {
+		await db()
+			.insert(memberRepoMonth)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [memberRepoMonth.login, memberRepoMonth.owner, memberRepoMonth.repo, memberRepoMonth.month],
+				set: {
+					commits: sqlExcluded('commits'),
+					mergedPrs: sqlExcluded('merged_prs'),
+					additions: sqlExcluded('additions'),
+					deletions: sqlExcluded('deletions')
+				}
+			});
+	}
 }
 
 // --- review_repo_month ---
@@ -93,14 +103,15 @@ export async function getReviewRepoMonths(repos: Repo[], months: string[]): Prom
 }
 
 export async function upsertReviewRepoMonths(rows: ReviewRepoMonthRow[]): Promise<void> {
-	if (!rows.length) return;
-	await db()
-		.insert(reviewRepoMonth)
-		.values(rows)
-		.onConflictDoUpdate({
-			target: [reviewRepoMonth.reviewer, reviewRepoMonth.owner, reviewRepoMonth.repo, reviewRepoMonth.month],
-			set: { reviews: sqlExcluded('reviews'), comments: sqlExcluded('comments') }
-		});
+	for (const batch of chunk(rows, 5000)) {
+		await db()
+			.insert(reviewRepoMonth)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [reviewRepoMonth.reviewer, reviewRepoMonth.owner, reviewRepoMonth.repo, reviewRepoMonth.month],
+				set: { reviews: sqlExcluded('reviews'), comments: sqlExcluded('comments') }
+			});
+	}
 }
 
 // onConflict update set for every non-key column of repo_month.
