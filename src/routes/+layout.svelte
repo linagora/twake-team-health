@@ -8,6 +8,7 @@
 	import { attention } from '$lib/client/attention.svelte';
 	import { flow } from '$lib/client/flow.svelte';
 	import { page } from '$app/state';
+	import { afterNavigate } from '$app/navigation';
 
 	let { children, data } = $props();
 
@@ -46,14 +47,20 @@
 	});
 
 	// Seed the scope from server configuration (the configurable default teams),
-	// then let it manage selection + metrics loading client-side.
+	// then let it manage selection + metrics loading client-side. A URL query string
+	// (shared/bookmarked link) takes precedence over the per-browser preference.
 	$effect(() => {
 		if (!scope.initialized) {
 			scope.months = data.defaults.months;
 			scope.memberMonths = data.defaults.memberMonths;
-			scope.init(data.defaultTeams, data.teamsPersisted);
+			scope.init(data.defaultTeams, data.teamsPersisted, page.url);
 		}
 	});
+
+	// Keep the scope in the URL after every navigation, so each page is a shareable
+	// link. Plain sidebar links carry no query string; this re-applies it. Runs after
+	// the router is initialized, so replaceState is safe here (unlike a mount effect).
+	afterNavigate(() => scope.syncUrl());
 </script>
 
 <svelte:head>

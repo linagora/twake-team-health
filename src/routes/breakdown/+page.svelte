@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import OrgTrendView from '$lib/components/OrgTrendView.svelte';
 	import * as Card from '$lib/components/ui/card';
@@ -29,13 +31,23 @@
 		{ k: 'team', l: 'Team' },
 		{ k: 'repo', l: 'Repo' }
 	];
-	let mode = $state<Mode>('team');
-	let teamIds = $state<string[]>([]);
-	let repoKeys = $state<string[]>([]);
+
+	const parseList = (s: string | null): string[] =>
+		(s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+	// Initialize from the URL so a shared/bookmarked Breakdown link restores the
+	// exact scope. Reading page.url at setup works on both the server and client.
+	const initParams = page.url.searchParams;
+	const initMode: Mode = initParams.get('bmode') === 'repo' ? 'repo' : 'team';
+	const initTeams = parseList(initParams.get('bteams'));
+	const initRepos = parseList(initParams.get('brepos'));
+	let mode = $state<Mode>(initMode);
+	let teamIds = $state<string[]>(initTeams);
+	let repoKeys = $state<string[]>(initRepos);
 
 	// Seed the team selection once teams are available: the scope bar's active team
-	// (else the first team). After this the user is free to clear the selection.
-	let seeded = $state(false);
+	// (else the first team). Skipped when the URL already drove the selection.
+	let seeded = $state(initParams.has('bmode') || initTeams.length > 0 || initRepos.length > 0);
 	$effect(() => {
 		if (!seeded && scope.teams.length) {
 			const id = scope.activeTeam?.id ?? scope.teams[0]?.id;
@@ -44,6 +56,36 @@
 				seeded = true;
 			}
 		}
+	});
+
+	// Mirror the selection into the URL (replace, no history entry), preserving the
+	// scope params the layout manages. Only writes on an actual change.
+	function syncUrl(): void {
+		if (typeof window === 'undefined') return;
+		// Read the live location (not page.url) so this merges with scope params the
+		// layout applies in the same frame instead of racing/clobbering them.
+		const url = new URL(window.location.href);
+		url.searchParams.set('bmode', mode);
+		const teams = mode === 'team' ? teamIds : [];
+		const repos = mode === 'repo' ? repoKeys : [];
+		if (teams.length) url.searchParams.set('bteams', teams.join(','));
+		else url.searchParams.delete('bteams');
+		if (repos.length) url.searchParams.set('brepos', repos.join(','));
+		else url.searchParams.delete('brepos');
+		if (url.search === window.location.search) return;
+		try {
+			replaceState(url, page.state);
+		} catch {
+			// Router not initialized yet during hydration; retry once it is ready.
+			requestAnimationFrame(syncUrl);
+		}
+	}
+	// Track selection changes; reading mode/teamIds/repoKeys inside syncUrl registers them.
+	$effect(() => {
+		mode;
+		teamIds;
+		repoKeys;
+		syncUrl();
 	});
 
 	// The repo-key set the current scope resolves to (union of selected teams' repos,
