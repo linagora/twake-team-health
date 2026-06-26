@@ -7,13 +7,13 @@
 	let { open = false, onClose }: { open?: boolean; onClose?: () => void } = $props();
 
 	const nav = [
-		// Team-scoped views first (summary -> action -> flow -> detail), then the
-		// org-wide view, then team management (config) last.
+		// Big-picture views first (Overview, Global), then team-scoped detail
+		// (Attention, Flow, Charts), then team management last.
 		{ href: '/', label: 'Overview', icon: LayoutDashboard, kbd: '01' },
-		{ href: '/attention', label: 'Attention', icon: TriangleAlert, kbd: '02' },
-		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '03' },
-		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '04' },
-		{ href: '/global', label: 'Global', icon: Globe, kbd: '05' },
+		{ href: '/global', label: 'Global', icon: Globe, kbd: '02' },
+		{ href: '/attention', label: 'Attention', icon: TriangleAlert, kbd: '03' },
+		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '04' },
+		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '05' },
 		{ href: '/teams', label: 'Teams', icon: Users, kbd: '06' }
 	];
 </script>
