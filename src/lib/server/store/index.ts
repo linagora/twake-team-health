@@ -6,6 +6,8 @@ import type { MemberRepoMonthRow, ReviewRepoMonthRow } from './assemble';
 
 const uniq = <T>(xs: T[]) => [...new Set(xs)];
 const repoSet = (repos: Repo[]) => new Set(repos.map((r) => `${r.owner}/${r.repo}`));
+const owners = (repos: Repo[]) => uniq(repos.map((r) => r.owner));
+const repoNames = (repos: Repo[]) => uniq(repos.map((r) => r.repo));
 // Postgres caps a statement at 65535 bind parameters; a big team's member grid
 // (members x repos x months) can exceed that, so inserts are batched. Sizes leave
 // headroom for each table's column count.
@@ -17,6 +19,16 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
 // On-conflict updates copy from the row we tried to insert ("excluded").
 const sqlExcluded = (col: string) => sql.raw(`excluded.${col}`);
 
+// fetched_at is internal cache metadata; strip it from rows returned for reports
+// so it never leaks into the API payload.
+function stripFetchedAt<T extends { fetchedAt?: unknown }>(rows: T[]): T[] {
+	return rows.map((r) => {
+		const copy = { ...r };
+		delete (copy as { fetchedAt?: unknown }).fetchedAt;
+		return copy;
+	});
+}
+
 // --- repo_month ---
 export async function getRepoMonths(repos: Repo[], months: string[]): Promise<RepoMonth[]> {
 	if (!repos.length || !months.length) return [];
@@ -26,12 +38,12 @@ export async function getRepoMonths(repos: Repo[], months: string[]): Promise<Re
 		.from(repoMonth)
 		.where(
 			and(
-				inArray(repoMonth.owner, uniq(repos.map((r) => r.owner))),
-				inArray(repoMonth.repo, uniq(repos.map((r) => r.repo))),
+				inArray(repoMonth.owner, owners(repos)),
+				inArray(repoMonth.repo, repoNames(repos)),
 				inArray(repoMonth.month, months)
 			)
 		);
-	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
+	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
 }
 
 export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
@@ -44,6 +56,26 @@ export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
 				set: repoMonthConflictSet()
 			});
 	}
+}
+
+/** Map of `${owner}/${repo}::${month}` → when that row was last fetched, for the
+ * requested repos+months. Drives the "is this month still fresh?" decision. */
+export async function repoMonthFetchedAt(repos: Repo[], months: string[]): Promise<Map<string, Date>> {
+	const out = new Map<string, Date>();
+	if (!repos.length || !months.length) return out;
+	const want = repoSet(repos);
+	const rows = await db()
+		.select({ owner: repoMonth.owner, repo: repoMonth.repo, month: repoMonth.month, fetchedAt: repoMonth.fetchedAt })
+		.from(repoMonth)
+		.where(
+			and(
+				inArray(repoMonth.owner, owners(repos)),
+				inArray(repoMonth.repo, repoNames(repos)),
+				inArray(repoMonth.month, months)
+			)
+		);
+	for (const r of rows) if (want.has(`${r.owner}/${r.repo}`)) out.set(`${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
+	return out;
 }
 
 // --- member_repo_month ---
@@ -60,12 +92,12 @@ export async function getMemberRepoMonths(
 		.where(
 			and(
 				inArray(memberRepoMonth.login, logins),
-				inArray(memberRepoMonth.owner, uniq(repos.map((r) => r.owner))),
-				inArray(memberRepoMonth.repo, uniq(repos.map((r) => r.repo))),
+				inArray(memberRepoMonth.owner, owners(repos)),
+				inArray(memberRepoMonth.repo, repoNames(repos)),
 				inArray(memberRepoMonth.month, months)
 			)
 		);
-	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
+	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
 }
 
 export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promise<void> {
@@ -79,10 +111,42 @@ export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promis
 					commits: sqlExcluded('commits'),
 					mergedPrs: sqlExcluded('merged_prs'),
 					additions: sqlExcluded('additions'),
-					deletions: sqlExcluded('deletions')
+					deletions: sqlExcluded('deletions'),
+					fetchedAt: sql`now()`
 				}
 			});
 	}
+}
+
+/** Map of `${login}::${owner}/${repo}::${month}` → when that row was last fetched. */
+export async function memberMonthFetchedAt(
+	logins: string[],
+	repos: Repo[],
+	months: string[]
+): Promise<Map<string, Date>> {
+	const out = new Map<string, Date>();
+	if (!logins.length || !repos.length || !months.length) return out;
+	const want = repoSet(repos);
+	const rows = await db()
+		.select({
+			login: memberRepoMonth.login,
+			owner: memberRepoMonth.owner,
+			repo: memberRepoMonth.repo,
+			month: memberRepoMonth.month,
+			fetchedAt: memberRepoMonth.fetchedAt
+		})
+		.from(memberRepoMonth)
+		.where(
+			and(
+				inArray(memberRepoMonth.login, logins),
+				inArray(memberRepoMonth.owner, owners(repos)),
+				inArray(memberRepoMonth.repo, repoNames(repos)),
+				inArray(memberRepoMonth.month, months)
+			)
+		);
+	for (const r of rows)
+		if (want.has(`${r.owner}/${r.repo}`)) out.set(`${r.login}::${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
+	return out;
 }
 
 // --- review_repo_month ---
@@ -94,12 +158,12 @@ export async function getReviewRepoMonths(repos: Repo[], months: string[]): Prom
 		.from(reviewRepoMonth)
 		.where(
 			and(
-				inArray(reviewRepoMonth.owner, uniq(repos.map((r) => r.owner))),
-				inArray(reviewRepoMonth.repo, uniq(repos.map((r) => r.repo))),
+				inArray(reviewRepoMonth.owner, owners(repos)),
+				inArray(reviewRepoMonth.repo, repoNames(repos)),
 				inArray(reviewRepoMonth.month, months)
 			)
 		);
-	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
+	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
 }
 
 export async function upsertReviewRepoMonths(rows: ReviewRepoMonthRow[]): Promise<void> {
@@ -109,7 +173,7 @@ export async function upsertReviewRepoMonths(rows: ReviewRepoMonthRow[]): Promis
 			.values(batch)
 			.onConflictDoUpdate({
 				target: [reviewRepoMonth.reviewer, reviewRepoMonth.owner, reviewRepoMonth.repo, reviewRepoMonth.month],
-				set: { reviews: sqlExcluded('reviews'), comments: sqlExcluded('comments') }
+				set: { reviews: sqlExcluded('reviews'), comments: sqlExcluded('comments'), fetchedAt: sql`now()` }
 			});
 	}
 }
@@ -140,5 +204,6 @@ function repoMonthConflictSet() {
 	};
 	const set: Record<string, unknown> = {};
 	for (const [prop, col] of Object.entries(cols)) set[prop] = sqlExcluded(col);
+	set.fetchedAt = sql`now()`;
 	return set;
 }

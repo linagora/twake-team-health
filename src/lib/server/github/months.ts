@@ -14,6 +14,10 @@ export function monthEnd(m: Month): string {
 	return `${m.year}-${pad(m.month)}-${pad(lastDay)}`;
 }
 
+/** Epoch ms of the final instant of the month (UTC) — the point after which a
+ * completed month's data can no longer change. */
+export const monthEndMs = (m: Month): number => Date.parse(monthEnd(m) + 'T23:59:59.999Z');
+
 /**
  * The last `n` months ending with (and including) the current month, ascending.
  * Including the in-progress month is intentional, so "today's changes" show up.

@@ -12,10 +12,11 @@ import {
 import type { Member, Repo } from '../github/types';
 
 // ---------------------------------------------------------------------------
-// Composable monthly report store. Each row is a finalized fact for one
-// (entity, month); a completed month is written once and reused by every team.
-// The current (in-progress) month is never stored as final — it is recomputed
-// live and only persisted once the month rolls over.
+// Composable monthly report store. Each row is a fact for one (entity, month),
+// reused by every team. A completed month is written once and never refetched.
+// The current (in-progress) month is also stored, with `fetched_at` recording
+// when it was last pulled from GitHub; it is refreshed only once it goes stale
+// (CURRENT_MONTH_TTL_MS), so the shared token isn't hit on every request.
 // ---------------------------------------------------------------------------
 
 export const repoMonth = pgTable(
@@ -43,7 +44,8 @@ export const repoMonth = pgTable(
 		releases: integer('releases').notNull(),
 		resolutionDays: doublePrecision('resolution_days').notNull(),
 		resolutionStd: doublePrecision('resolution_std').notNull(),
-		resolutionRate: doublePrecision('resolution_rate').notNull()
+		resolutionRate: doublePrecision('resolution_rate').notNull(),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
 	},
 	(t) => [primaryKey({ columns: [t.owner, t.repo, t.month] })]
 );
@@ -58,7 +60,8 @@ export const memberRepoMonth = pgTable(
 		commits: integer('commits').notNull(),
 		mergedPrs: integer('merged_prs').notNull(),
 		additions: integer('additions').notNull().default(0),
-		deletions: integer('deletions').notNull().default(0)
+		deletions: integer('deletions').notNull().default(0),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
 	},
 	(t) => [primaryKey({ columns: [t.login, t.owner, t.repo, t.month] })]
 );
@@ -71,7 +74,8 @@ export const reviewRepoMonth = pgTable(
 		repo: text('repo').notNull(),
 		month: text('month').notNull(),
 		reviews: integer('reviews').notNull(),
-		comments: integer('comments').notNull()
+		comments: integer('comments').notNull(),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
 	},
 	// Reads filter by (owner, repo, month) with no reviewer predicate, so the
 	// reviewer-leading PK can't serve them; this index avoids a full table scan.
