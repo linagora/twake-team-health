@@ -254,6 +254,20 @@
 	main {
 		width: 100% !important;
 	}
+	/* Keep each card and chart whole instead of splitting one across a page break
+	   (avoids half a panel at the bottom of a page and half at the top of the next). */
+	[data-slot='card'],
+	figure {
+		break-inside: avoid;
+		page-break-inside: avoid;
+	}
+	/* Don't strand a section heading at the bottom of a page, away from its content. */
+	h1,
+	h2,
+	h3 {
+		break-after: avoid;
+		page-break-after: avoid;
+	}
 }
 
 @keyframes pulse-brand {
