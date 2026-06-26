@@ -36,6 +36,13 @@
       "when": 1782503740636,
       "tag": "0004_natural_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782510526679,
+      "tag": "0005_fixed_fenris",
+      "breakpoints": true
     }
   ]
 }

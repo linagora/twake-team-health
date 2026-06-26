@@ -8,6 +8,20 @@ import { dev } from '$app/environment';
 // silently exposing everything as the synthetic dev user.
 export const AUTH_DISABLED = env.AUTH_DISABLED === 'true' || (!env.OIDC_ISSUER && dev);
 
+// Admins (allowed to edit app-wide settings) are listed by OIDC subject in
+// ADMIN_SUBS. With auth disabled the synthetic dev user is treated as admin so
+// local dev can use the settings UI; in prod with no ADMIN_SUBS, nobody is admin
+// (settings stay read-only), which preserves the current env-only behavior.
+export function isAdmin(sub: string | undefined | null): boolean {
+	if (AUTH_DISABLED) return true;
+	if (!sub) return false;
+	return (env.ADMIN_SUBS ?? '')
+		.split(',')
+		.map((s) => s.trim())
+		.filter(Boolean)
+		.includes(sub);
+}
+
 // Generic OIDC client pointed at the registration service (authorization code +
 // PKCE; session in an encrypted JWT cookie — no server-side session store).
 export const { handle: authHandle, signIn, signOut } = SvelteKitAuth({

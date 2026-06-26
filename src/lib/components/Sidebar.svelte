@@ -1,22 +1,23 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers } from '@lucide/svelte';
+	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers, Cog } from '@lucide/svelte';
 	import linagoraLogo from '$lib/assets/linagora-logo.svg';
 	import twakeLogo from '$lib/assets/twake-logo.svg';
 
-	let { open = false, onClose }: { open?: boolean; onClose?: () => void } = $props();
+	let { open = false, onClose, isAdmin = false }: { open?: boolean; onClose?: () => void; isAdmin?: boolean } = $props();
 
-	const nav = [
+	const nav = $derived([
 		// Big-picture views first (Overview, Global), then team-scoped detail
-		// (Attention, Flow, Charts), then team management last.
+		// (Attention, Flow, Charts), then team management, then admin settings.
 		{ href: '/', label: 'Overview', icon: LayoutDashboard, kbd: '01' },
 		{ href: '/global', label: 'Global', icon: Globe, kbd: '02' },
 		{ href: '/breakdown', label: 'Breakdown', icon: Layers, kbd: '03' },
 		{ href: '/attention', label: 'Attention', icon: TriangleAlert, kbd: '04' },
 		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '05' },
 		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '06' },
-		{ href: '/teams', label: 'Teams', icon: Users, kbd: '07' }
-	];
+		{ href: '/teams', label: 'Teams', icon: Users, kbd: '07' },
+		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '08' }] : [])
+	]);
 </script>
 
 <!-- Off-canvas drawer below lg; a static rail at lg and up. -->

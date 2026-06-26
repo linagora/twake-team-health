@@ -103,6 +103,15 @@ export const team = pgTable(
 	(t) => [index('team_owner_idx').on(t.ownerSub)]
 );
 
+// Singleton app-wide configuration overrides (admin-editable). Each key that is
+// absent falls back to its environment default, so an empty/missing row leaves
+// behavior identical to a pure env configuration.
+export const appConfig = pgTable('app_config', {
+	id: text('id').primaryKey(), // always 'app'
+	value: jsonb('value').$type<Record<string, unknown>>().notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+});
+
 export const auditLog = pgTable(
 	'audit_log',
 	{

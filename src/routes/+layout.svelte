@@ -32,6 +32,7 @@
 		if (p.startsWith('/global')) return 'Global trends';
 		if (p.startsWith('/breakdown')) return 'Breakdown';
 		if (p.startsWith('/teams')) return 'Teams';
+		if (p.startsWith('/settings')) return 'Settings';
 		if (p.startsWith('/charts')) return 'Charts';
 		if (p.startsWith('/auth')) return 'Sign in';
 		return '';
@@ -88,7 +89,7 @@
 		></button>
 	{/if}
 
-	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} />
+	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} />
 
 	<main class="flex-1 min-w-0">
 		<ScopeBar
