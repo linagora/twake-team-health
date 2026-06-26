@@ -33,6 +33,18 @@
 
 <svelte:head>
 	<title>team·health</title>
+	<meta property="og:site_name" content="team·health" />
+	<meta property="og:type" content="website" />
+	<meta property="og:title" content="team·health — engineering metrics" />
+	<meta property="og:description" content="Live engineering-delivery metrics for any GitHub team: PR throughput, review depth, code volume, and release cadence." />
+	<meta property="og:url" content={page.url.href} />
+	<meta property="og:image" content="{page.url.origin}/og.png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="team·health — engineering metrics" />
+	<meta name="twitter:description" content="Live engineering-delivery metrics for any GitHub team." />
+	<meta name="twitter:image" content="{page.url.origin}/og.png" />
 </svelte:head>
 
 <div class="flex min-h-screen">
