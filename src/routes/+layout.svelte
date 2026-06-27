@@ -27,6 +27,7 @@
 	const pageSection = $derived.by(() => {
 		const p = page.url.pathname;
 		if (p === '/') return 'Overview';
+		if (p.startsWith('/signals')) return 'Signals';
 		if (p.startsWith('/attention')) return 'Attention';
 		if (p.startsWith('/flow')) return 'Flow';
 		if (p.startsWith('/global')) return 'Global trends';

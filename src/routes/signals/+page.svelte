@@ -30,9 +30,10 @@
 	const problems = $derived(signals.filter((s) => s.level !== 'ok'));
 	const passing = $derived(signals.filter((s) => s.level === 'ok'));
 
+	// amber-700, not amber-600: the value text needs >= 4.5:1 contrast on the card.
 	const accent: Record<SignalLevel, string> = {
 		bad: 'var(--color-negative)',
-		warn: '#d97706',
+		warn: '#b45309',
 		ok: 'var(--color-positive)'
 	};
 </script>
