@@ -2,6 +2,7 @@
 // wrong right now" signals, judged against targets. Pure and unit-tested; the
 // /signals page just renders the result.
 import type { MetricsResult, FlowResult, AttentionResult } from './server/github/types';
+import { monthKeyOf } from './months';
 
 export type SignalLevel = 'ok' | 'warn' | 'bad';
 
@@ -93,7 +94,8 @@ export function computeSignals(
 	metrics: MetricsResult | null,
 	flow: FlowResult | null,
 	attention: AttentionResult | null,
-	t: Targets = DEFAULT_TARGETS
+	t: Targets = DEFAULT_TARGETS,
+	nowMonthKey: string = monthKeyOf()
 ): Signal[] {
 	const out: Signal[] = [];
 
@@ -144,8 +146,9 @@ export function computeSignals(
 		});
 
 		// Throughput anomaly: the last completed month vs the median of the months
-		// before it. The current (in-progress) month is partial, so it is excluded.
-		const complete = flow.byMonth.slice(0, -1);
+		// before it. Exclude only the current (partial) calendar month — for a
+		// historical window the final month is complete and must be kept.
+		const complete = flow.byMonth.filter((m) => m.month < nowMonthKey);
 		if (complete.length >= 3) {
 			const last = complete[complete.length - 1].count;
 			const baseline = median(complete.slice(0, -1).map((m) => m.count));
@@ -228,7 +231,7 @@ export function computeSignals(
 			if (e.total < t.busMinCommits) continue;
 			const pct = Math.round((e.top / e.total) * 100);
 			if (pct >= t.busShareWarnPct && e.topAuthor) {
-				concentratedList.push({ login: e.topAuthor, note: `wrote ${pct}% of ${repo}`, pct });
+				concentratedList.push({ login: e.topAuthor, note: `wrote ${pct}% of the team's commits to ${repo}`, pct });
 			}
 		}
 		concentratedList.sort((a, b) => b.pct - a.pct);

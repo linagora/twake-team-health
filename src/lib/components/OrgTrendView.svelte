@@ -4,6 +4,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { avgOver, type OrgMonth } from '$lib/charts';
 	import { fmtMonth, fmtNum } from '$lib/utils';
+	import { monthKeyOf } from '$lib/months';
 	import { ArrowUp, ArrowDown, Minus } from '@lucide/svelte';
 
 	// One aggregated monthly trend (org-wide or scoped); the parent decides the scope
@@ -22,8 +23,13 @@
 		if (!splitMonth || !months.includes(splitMonth))
 			splitMonth = months.length ? months[Math.floor(months.length / 2)] : '';
 	});
-	const before = $derived(trend.filter((t) => t.month < splitMonth));
-	const after = $derived(trend.filter((t) => t.month >= splitMonth));
+	// The before/after AVERAGES exclude the in-progress current month: a month
+	// that is only a few days old would otherwise count as a full data point and
+	// drag the "after" average down into a false decline. (The charts still plot
+	// every month; only the averaged comparison drops the partial one.)
+	const complete = $derived(trend.filter((t) => t.month < monthKeyOf()));
+	const before = $derived(complete.filter((t) => t.month < splitMonth));
+	const after = $derived(complete.filter((t) => t.month >= splitMonth));
 
 	type Series = { key: string; label: string; color: string };
 	const PANELS: { title: string; blurb: string; kind: 'line' | 'bar'; series: Series[] }[] = [

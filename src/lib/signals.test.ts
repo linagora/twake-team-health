@@ -70,13 +70,22 @@ describe('computeSignals', () => {
 	it('detects a throughput drop against the recent median, ignoring the partial current month', () => {
 		// completed months [10,10,2] (last entry is the in-progress month, dropped):
 		// last full = 2, baseline = median(10,10) = 10 -> 80% drop.
-		const sig = computeSignals(null, flowWith({}, [10, 10, 2, 1]), null);
+		// nowMonthKey 2026-04 => the 4th month is the current partial one, excluded.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 2, 1]), null, DEFAULT_TARGETS, '2026-04');
 		expect(find(sig, 'throughput-drop')?.level).toBe('bad');
 	});
 
 	it('does not flag steady throughput', () => {
-		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null);
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-04');
 		expect(find(sig, 'throughput-drop')?.level).toBe('ok');
+	});
+
+	it('keeps the final month for a historical window (now is later)', () => {
+		// months 2026-01..04 are all complete because now is 2026-06; the drop in the
+		// last month must be detected, not silently dropped as "partial".
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 2]), null, DEFAULT_TARGETS, '2026-06');
+		expect(find(sig, 'throughput-drop')?.value).toBe('2 merged');
+		expect(find(sig, 'throughput-drop')?.level).toBe('bad');
 	});
 
 	it('flags aging/stale/unreviewed PRs from the attention summary', () => {
