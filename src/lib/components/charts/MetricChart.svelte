@@ -69,9 +69,27 @@
 		yAxis: { ticks: 4, format: formatY, tickLabelProps: tickLabel },
 		grid: { class: 'stroke-[var(--color-ink-300)]', 'stroke-dasharray': '2 4' }
 	});
+
+	// Defer the (expensive) chart render until it scrolls near the viewport, so a
+	// page with many panels only draws the few that are initially visible; the rest
+	// render on scroll. The placeholder keeps the same size so layout doesn't shift.
+	let visible = $state(false);
+	function inView(node: HTMLElement) {
+		const io = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((e) => e.isIntersecting)) {
+					visible = true;
+					io.disconnect();
+				}
+			},
+			{ rootMargin: '300px' }
+		);
+		io.observe(node);
+		return { destroy: () => io.disconnect() };
+	}
 </script>
 
-<div class="flex flex-col gap-3">
+<div class="flex flex-col gap-3" use:inView>
 	{#if legend && series.length > 1}
 		<div class="flex flex-wrap items-center gap-x-5 gap-y-1.5">
 			{#each series as s (s.key)}
@@ -85,7 +103,8 @@
 		</div>
 	{/if}
 
-	<Chart.Container {config} class={className}>
+	{#if visible}
+		<Chart.Container {config} class={className}>
 		{#if kind === 'bar'}
 			<BarChart
 				{data}
@@ -134,7 +153,10 @@
 				{/snippet}
 			</LineChart>
 		{/if}
-	</Chart.Container>
+		</Chart.Container>
+	{:else}
+		<div class={className} aria-hidden="true"></div>
+	{/if}
 
 	{#if partialMonth}
 		<p class="text-[10px] text-[var(--color-ink-500)]">

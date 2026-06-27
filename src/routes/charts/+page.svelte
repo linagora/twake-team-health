@@ -69,12 +69,15 @@
 
 	let activeCategory = $state('nb_pr');
 
-	const repos = $derived(stats ? repoSeries(stats.repos) : []);
-	const commits = $derived(stats ? commitsChart(stats, config) : { months: [], data: [], members: [] });
-	const merged = $derived(stats ? mergedPrChart(stats, config) : { months: [], data: [], members: [] });
-	const reviews = $derived(stats ? reviewActivityChart(stats, config) : []);
-	const tickets = $derived(stats ? ticketsChart(stats) : []);
-	const commitsByRepo = $derived(stats ? commitsByRepoChart(stats, config) : { repos: [], data: [], members: [] });
+	// Only one category renders at a time, so compute each transform lazily — eagerly
+	// running all six (the member-heavy ones especially) is what froze navigation in.
+	const EMPTY_MEMBER = { months: [] as string[], data: [], members: [] as string[] };
+	const repos = $derived(stats && PER_REPO[activeCategory] ? repoSeries(stats.repos) : []);
+	const commits = $derived(stats && activeCategory === 'Commits' ? commitsChart(stats, config) : EMPTY_MEMBER);
+	const merged = $derived(stats && activeCategory === 'MergedPRs' ? mergedPrChart(stats, config) : EMPTY_MEMBER);
+	const reviews = $derived(stats && activeCategory === 'Reviews' ? reviewActivityChart(stats, config) : []);
+	const tickets = $derived(stats && activeCategory === 'Tickets' ? ticketsChart(stats) : []);
+	const commitsByRepo = $derived(stats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(stats, config) : { repos: [], data: [], members: [] });
 
 	// Map a set of keys to colored series; `label` formats the displayed name.
 	function keySeries(keys: string[], label: (k: string) => string = (k) => k): SeriesCfg[] {
