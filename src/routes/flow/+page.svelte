@@ -31,6 +31,7 @@
 		o
 			? [
 					{ label: 'Time to first review', value: dur(o.firstReviewHours), hint: 'median, open to first review' },
+						{ label: 'Review', value: dur(o.reviewHours ?? 0), hint: 'median, first review to approval' },
 					{ label: 'Cycle time', value: dur(o.mergeHours), hint: 'median, open to merge' },
 					{ label: 'After approval', value: dur(o.postApproveHours), hint: 'median, approve to merge' },
 					{ label: 'Review coverage', value: `${o.reviewedPct}%`, hint: 'merged PRs that got a review' }

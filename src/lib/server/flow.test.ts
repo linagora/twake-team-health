@@ -20,6 +20,7 @@ describe('computeFlow', () => {
 		expect(r.overall.count).toBe(3);
 		expect(r.overall.reviewedPct).toBe(67); // 2 of 3 reviewed
 		expect(r.overall.firstReviewHours).toBe(4); // median(2, 6)
+		expect(r.overall.reviewHours).toBe(21); // median(20-2, 30-6) = median(18, 24)
 		expect(r.overall.mergeHours).toBe(24); // median(10, 24, 36)
 		expect(r.overall.postApproveHours).toBe(5); // median(4, 6)
 	});

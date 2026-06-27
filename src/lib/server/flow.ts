@@ -10,15 +10,21 @@ const hoursBetween = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) /
 
 function statsFor(prs: PrFlow[]): FlowStats {
 	const count = prs.length;
-	if (!count) return { count: 0, reviewedPct: 0, firstReviewHours: 0, mergeHours: 0, postApproveHours: 0 };
+	if (!count)
+		return { count: 0, reviewedPct: 0, firstReviewHours: 0, reviewHours: 0, mergeHours: 0, postApproveHours: 0 };
 	const reviewed = prs.filter((p) => p.firstReviewAt);
 	const firstReview = reviewed.map((p) => hoursBetween(p.createdAt, p.firstReviewAt!)).filter((h) => h >= 0);
+	const review = prs
+		.filter((p) => p.firstReviewAt && p.approvedAt)
+		.map((p) => hoursBetween(p.firstReviewAt!, p.approvedAt!))
+		.filter((h) => h >= 0);
 	const merge = prs.map((p) => hoursBetween(p.createdAt, p.mergedAt)).filter((h) => h >= 0);
 	const postApprove = prs.filter((p) => p.approvedAt).map((p) => hoursBetween(p.approvedAt!, p.mergedAt)).filter((h) => h >= 0);
 	return {
 		count,
 		reviewedPct: round((reviewed.length / count) * 100),
 		firstReviewHours: med(firstReview),
+		reviewHours: med(review),
 		mergeHours: med(merge),
 		postApproveHours: med(postApprove)
 	};

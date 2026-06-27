@@ -37,6 +37,8 @@ export type Targets = {
 	reviewShareWarnPct: number; // busiest reviewer's share of all reviews
 	reviewShareBadPct: number;
 	minReviewers: number; // need at least this many to judge balance
+	stageWarnH: number; // a single PR-lifecycle stage this slow is worth flagging
+	stageBadH: number;
 };
 
 export const DEFAULT_TARGETS: Targets = {
@@ -60,7 +62,9 @@ export const DEFAULT_TARGETS: Targets = {
 	concentratedBad: 4,
 	reviewShareWarnPct: 50,
 	reviewShareBadPct: 70,
-	minReviewers: 3
+	minReviewers: 3,
+	stageWarnH: 24,
+	stageBadH: 72
 };
 
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
@@ -116,6 +120,26 @@ export function computeSignals(
 			value: `${o.reviewedPct}%`,
 			target: `at least ${t.reviewedWarnPct}%`,
 			detail: 'Share of merged PRs that got at least one review.'
+		});
+
+		// Bottleneck: which PR-lifecycle stage eats the most time, so a slow cycle
+		// can be localized instead of just observed.
+		// reviewHours is newer than some cached FlowResults; tolerate its absence.
+		const stages = [
+			{ name: 'waiting for first review', h: o.firstReviewHours },
+			{ name: 'in review (first review to approval)', h: o.reviewHours ?? 0 },
+			{ name: 'waiting to merge after approval', h: o.postApproveHours }
+		];
+		const top = stages.reduce((a, b) => (b.h > a.h ? b : a));
+		const sum = stages.reduce((s, x) => s + x.h, 0);
+		const share = sum > 0 ? Math.round((top.h / sum) * 100) : 0;
+		out.push({
+			id: 'bottleneck',
+			level: highIsBad(top.h, t.stageWarnH, t.stageBadH),
+			title: 'Slowest PR stage',
+			value: dur(top.h),
+			target: `under ${dur(t.stageWarnH)}`,
+			detail: `Most reviewable PR time is spent ${top.name} (${share}% of the tracked stages).`
 		});
 
 		// Throughput anomaly: the last completed month vs the median of the months

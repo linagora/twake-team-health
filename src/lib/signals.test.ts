@@ -23,6 +23,7 @@ const stats = (o: Partial<FlowStats>): FlowStats => ({
 	count: 10,
 	reviewedPct: 100,
 	firstReviewHours: 2,
+	reviewHours: 2,
 	mergeHours: 10,
 	postApproveHours: 1,
 	...o
@@ -83,6 +84,17 @@ describe('computeSignals', () => {
 		expect(find(sig, 'aging-prs')?.level).toBe('bad');
 		expect(find(sig, 'stale-prs')?.level).toBe('ok');
 		expect(find(sig, 'unreviewed-prs')?.level).toBe('warn');
+	});
+
+	it('identifies the slowest PR stage as the bottleneck', () => {
+		const sig = computeSignals(
+			null,
+			flowWith({ firstReviewHours: 4, reviewHours: 80, postApproveHours: 2 }),
+			null
+		);
+		const b = find(sig, 'bottleneck');
+		expect(b?.level).toBe('bad'); // 80h review stage > stageBadH
+		expect(b?.detail).toContain('in review');
 	});
 
 	it('flags review-load imbalance when one reviewer dominates', () => {
