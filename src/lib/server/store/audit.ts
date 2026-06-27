@@ -1,3 +1,4 @@
+import { and, desc, eq, or } from 'drizzle-orm';
 import { db, hasDb } from '../db';
 import { auditLog } from '../db/schema';
 
@@ -55,6 +56,24 @@ export async function logEvent(e: EventInput): Promise<void> {
 	} catch {
 		/* logging must never break the request */
 	}
+}
+
+export type EventFilter = { kind?: EventKind; suspicious?: boolean; user?: string; limit?: number };
+
+/** Recent events, newest first, for the admin log viewer. `user` matches sub or email. */
+export async function getEvents(f: EventFilter = {}) {
+	if (!hasDb()) return [];
+	const conds = [];
+	if (f.kind) conds.push(eq(auditLog.kind, f.kind));
+	if (f.suspicious) conds.push(eq(auditLog.suspicious, true));
+	if (f.user) {
+		const u = f.user.toLowerCase();
+		conds.push(or(eq(auditLog.userSub, f.user), eq(auditLog.userEmail, u)));
+	}
+	const limit = Math.min(Math.max(1, f.limit ?? 200), 1000);
+	const base = db().select().from(auditLog);
+	const q = conds.length ? base.where(and(...conds)) : base;
+	return q.orderBy(desc(auditLog.ts)).limit(limit);
 }
 
 /** Best-effort per-user semantic action log (kind 'action'). */
