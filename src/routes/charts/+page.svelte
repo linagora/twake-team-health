@@ -201,7 +201,7 @@
 			<aside class="col-span-12 lg:col-span-3">
 				<div class="eyebrow mb-4 hidden lg:block">Categories</div>
 				<!-- Horizontal chip scroller on mobile; sticky vertical list on lg+. -->
-				<nav class="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0 lg:sticky lg:top-32">
+				<nav class="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:gap-1 lg:px-0 lg:pb-0 lg:sticky lg:top-32 lg:max-h-[calc(100vh_-_9rem)] lg:overflow-y-auto">
 					{#each CATEGORIES as c (c.key)}
 						<button
 							onclick={() => selectCategory(c.key)}

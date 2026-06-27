@@ -43,29 +43,32 @@
 				No automated reviewers on this team's merged PRs.
 			</Card.Root>
 		{:else}
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+			<div class="grid grid-cols-1 gap-5 md:grid-cols-2">
 				{#each bots as b (b.login)}
 					{@const total = b.reviews + b.comments}
-					<Card.Root class="gap-0 p-5 shadow-sm">
-						<div class="flex items-center gap-3">
-							<Avatar login={b.login} name={b.login} size={36} />
+					<Card.Root class="gap-0 p-6 shadow-sm">
+						<div class="flex items-center gap-3.5">
+							<Avatar login={b.login} name={b.login} srcUrl={b.avatarUrl} size={44} />
 							<div class="min-w-0">
 								<a
-									href="https://github.com/{b.login}"
+									href="https://github.com/apps/{b.login}"
 									target="_blank"
 									rel="noopener noreferrer"
-									class="block truncate font-display text-base text-[var(--color-ink-950)] hover:text-[var(--color-brand)] hover:underline"
+									class="block truncate font-display text-lg text-[var(--color-ink-950)] hover:text-[var(--color-brand)] hover:underline"
 								>
 									{b.login}
 								</a>
 								<div class="font-mono text-[11px] text-[var(--color-ink-500)]">{fmtNum(total)} total</div>
 							</div>
 						</div>
-						<div class="mt-4 grid grid-cols-3 gap-3">
-							<div>
-								<div class="font-mono tabular text-xl text-[var(--color-ink-950)]">{fmtNum(b.reviews)}</div>
-								<div class="eyebrow mt-0.5">Reviews</div>
-							</div>
+						<!-- Hide Reviews for comment-only bots (a 0 there is just noise). -->
+						<div class="mt-5 grid gap-3 {b.reviews > 0 ? 'grid-cols-3' : 'grid-cols-2'}">
+							{#if b.reviews > 0}
+								<div>
+									<div class="font-mono tabular text-xl text-[var(--color-ink-950)]">{fmtNum(b.reviews)}</div>
+									<div class="eyebrow mt-0.5">Reviews</div>
+								</div>
+							{/if}
 							<div>
 								<div class="font-mono tabular text-xl text-[var(--color-ink-950)]">{fmtNum(b.comments)}</div>
 								<div class="eyebrow mt-0.5">Comments</div>

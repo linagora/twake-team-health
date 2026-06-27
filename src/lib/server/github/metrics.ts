@@ -164,7 +164,7 @@ const MERGED_VOLUME_FIELDS = `... on PullRequest { additions deletions createdAt
 const ISSUE_NODE_FIELDS = `... on Issue { createdAt closedAt labels(first: 10) { nodes { name } } }`;
 const MERGED_PR_NODE_FIELDS = `... on PullRequest { author { login } additions deletions }`;
 const REVIEW_PR_NODE_FIELDS = `... on PullRequest { author { login } reviews(first: 50) { nodes { author { login } submittedAt state } } comments(first: 100) { nodes { author { login } createdAt } } }`;
-const FLOW_PR_NODE_FIELDS = `... on PullRequest { createdAt mergedAt reviews(first: 100) { nodes { submittedAt state author { login __typename } comments { totalCount } } } }`;
+const FLOW_PR_NODE_FIELDS = `... on PullRequest { createdAt mergedAt reviews(first: 100) { nodes { submittedAt state author { login __typename avatarUrl } comments { totalCount } } } }`;
 const mergedVolumeQuery = (owner: string, repo: string, m: Month) =>
 	`repo:${owner}/${repo} type:pr is:merged merged:${monthStart(m)}..${monthEnd(m)} sort:created-asc`;
 const openedIssueQuery = (owner: string, repo: string, m: Month) =>
@@ -687,7 +687,7 @@ export async function fetchPrFlow(
 					if (!mm) botMonth.set(month, (mm = new Map()));
 					for (const r of submitted) {
 						if (r.author.__typename !== 'Bot') continue;
-						const b = botAcc.get(r.author.login) ?? { login: r.author.login, reviews: 0, comments: 0, prs: 0 };
+						const b = botAcc.get(r.author.login) ?? { login: r.author.login, avatarUrl: r.author.avatarUrl ?? '', reviews: 0, comments: 0, prs: 0 };
 						const verdict = r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED';
 						const comments = r.comments?.totalCount ?? 0;
 						if (verdict) b.reviews += 1;

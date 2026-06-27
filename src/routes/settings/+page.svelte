@@ -108,7 +108,7 @@
 />
 
 <form method="POST" action="?/save" use:enhancer>
-	<div class="mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pt-10">
+	<div class="mx-auto max-w-5xl space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pt-10">
 		<!-- General -->
 		<Card.Root class="gap-0 p-6 shadow-sm">
 			<div class="flex items-center gap-2.5">
@@ -239,7 +239,7 @@
 
 	<!-- Sticky save bar -->
 	<div class="sticky bottom-0 border-t border-[var(--color-ink-200)] bg-[var(--color-ink-0)]/85 backdrop-blur-xl">
-		<div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-10">
+		<div class="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-10">
 			<Button type="submit" disabled={saving} size="lg">
 				{#if saving}<Loader2 class="h-4 w-4 animate-spin" />{/if} Save changes
 			</Button>
@@ -259,7 +259,7 @@
 </form>
 
 <!-- Maintenance (separate action; forms can't nest) -->
-<div class="mx-auto max-w-3xl px-4 pb-28 sm:px-6 lg:px-10">
+<div class="mx-auto max-w-5xl px-4 pb-28 sm:px-6 lg:px-10">
 	<Card.Root class="gap-0 p-6 shadow-sm">
 		<div class="flex items-center gap-2.5">
 			<RefreshCw class="h-4 w-4 text-[var(--color-brand)]" />

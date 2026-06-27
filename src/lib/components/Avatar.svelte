@@ -5,8 +5,9 @@
 		login,
 		name = '',
 		size = 20,
+		srcUrl = '',
 		class: klass = ''
-	}: { login: string; name?: string; size?: number; class?: string } = $props();
+	}: { login: string; name?: string; size?: number; srcUrl?: string; class?: string } = $props();
 
 	let failed = $state(false);
 	const initials = $derived(
@@ -19,7 +20,9 @@
 				.slice(0, 2) || '?'
 		).toUpperCase()
 	);
-	const src = $derived(`https://github.com/${encodeURIComponent(login)}.png?size=${size * 2}`);
+	// Explicit URL wins (e.g. a GitHub App's avatar, which has no login `.png`);
+	// otherwise derive it from the login.
+	const src = $derived(srcUrl || `https://github.com/${encodeURIComponent(login)}.png?size=${size * 2}`);
 </script>
 
 {#if failed}

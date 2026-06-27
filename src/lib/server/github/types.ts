@@ -116,6 +116,7 @@ export type ReviewerLoad = { reviewer: string; prs: number };
 /** Automated reviewer (CodeRabbit, CodeScene, Copilot, ...) activity on merged PRs. */
 export type BotActivity = {
 	login: string;
+	avatarUrl: string; // GitHub App/bot avatar (no login `.png` for Apps)
 	reviews: number; // APPROVED + CHANGES_REQUESTED submissions
 	comments: number; // inline review comments left
 	prs: number; // distinct PRs the bot reviewed (for comments-per-PR)
