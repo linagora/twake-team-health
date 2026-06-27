@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Popover from '$lib/components/ui/popover';
 	import { fmtMonth } from '$lib/utils';
-	import { monthKeyOf, addMonths } from '$lib/months';
+	import { monthKeyOf, addMonths, monthCount } from '$lib/months';
 	import { ChevronLeft, ChevronRight, Calendar } from '@lucide/svelte';
 
 	// A month-granularity range picker. Click a start month, then an end month;
@@ -49,6 +49,25 @@
 		open = false;
 		onChange(a, b);
 	}
+
+	// One-click rolling presets ending this month, the common case.
+	const PRESETS = [3, 6, 12].filter((n) => n <= maxMonths);
+	function rolling(n: number) {
+		const end = monthKeyOf();
+		pending = null;
+		open = false;
+		onChange(addMonths(end, -(n - 1)), end);
+	}
+	function thisYear() {
+		const end = monthKeyOf();
+		pending = null;
+		open = false;
+		onChange(`${end.slice(0, 4)}-01`, end);
+	}
+	// Selection is a rolling "last N months" window when it ends at the current month.
+	const isRolling = $derived(to === monthKeyOf());
+	const winLen = $derived(monthCount(from, to));
+	const activePreset = $derived(isRolling ? winLen : 0);
 </script>
 
 <Popover.Root
@@ -65,9 +84,33 @@
 		class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 text-sm text-[var(--color-ink-800)] hover:border-[var(--color-ink-400)]"
 	>
 		<Calendar class="h-3.5 w-3.5 text-[var(--color-ink-500)]" />
-		{fmtMonth(from)} <span class="text-[var(--color-ink-500)]">→</span> {fmtMonth(to)}
+		{#if isRolling}
+			Last {winLen} {winLen === 1 ? 'month' : 'months'}
+		{:else}
+			{fmtMonth(from)} <span class="text-[var(--color-ink-500)]">→</span> {fmtMonth(to)}
+		{/if}
 	</Popover.Trigger>
 	<Popover.Content class="w-60">
+		<!-- Quick presets: rolling windows ending this month -->
+		<div class="mb-3 flex flex-wrap gap-1.5">
+			{#each PRESETS as n (n)}
+				<button
+					onclick={() => rolling(n)}
+					class="rounded-md px-2 py-1 text-xs transition-colors {activePreset === n
+						? 'bg-[var(--color-brand)] text-white'
+						: 'bg-[var(--color-ink-100)] text-[var(--color-ink-700)] hover:bg-[var(--color-ink-200)]'}"
+				>
+					{n}m
+				</button>
+			{/each}
+			<button
+				onclick={thisYear}
+				class="rounded-md bg-[var(--color-ink-100)] px-2 py-1 text-xs text-[var(--color-ink-700)] transition-colors hover:bg-[var(--color-ink-200)]"
+			>
+				This year
+			</button>
+		</div>
+		<div class="mb-2 text-[11px] text-[var(--color-ink-500)]">Or pick a custom range</div>
 		<div class="mb-2 flex items-center justify-between">
 			<button
 				class="rounded-md p-1 text-[var(--color-ink-600)] hover:bg-[var(--color-ink-100)] disabled:opacity-30"

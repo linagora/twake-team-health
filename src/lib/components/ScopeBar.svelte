@@ -41,21 +41,31 @@
 	>
 		<Menu class="h-5 w-5" />
 	</button>
-	<span class="eyebrow hidden md:inline">Scope</span>
+	<span class="eyebrow hidden md:inline">Team</span>
 
 	<!-- Team picker -->
 	<Select.Root type="single" value={scope.activeTeamId} onValueChange={(v) => v && scope.setTeam(v)}>
-		<Select.Trigger class="h-8 min-w-[150px] bg-[var(--color-card)]">
+		<Select.Trigger class="h-8 min-w-[160px] gap-1.5 bg-[var(--color-card)]">
+			<Users class="h-3.5 w-3.5 shrink-0 text-[var(--color-ink-500)]" />
 			{active?.name}{active?.builtin ? ' (default)' : ''}
 		</Select.Trigger>
 		<Select.Content>
 			{#each scope.teams as t (t.id)}
-				<Select.Item value={t.id} label={t.name}>{t.name}{t.builtin ? ' (default)' : ''}</Select.Item>
+				<Select.Item value={t.id} label={t.name}>
+					<span class="flex flex-col gap-0.5">
+						<span>{t.name}{t.builtin ? ' (default)' : ''}</span>
+						<span class="font-mono text-[11px] text-[var(--color-ink-500)]">
+							{t.repos.length} repos · {t.members.length} members
+						</span>
+					</span>
+				</Select.Item>
 			{/each}
 		</Select.Content>
 	</Select.Root>
 
-	<!-- Range picker: any From → To window, at month granularity -->
+	<span class="eyebrow ml-1 hidden md:inline">Period</span>
+
+	<!-- Range picker: quick presets + any From → To window, at month granularity -->
 	<MonthRangePicker
 		from={scope.rangeFrom}
 		to={scope.rangeTo}
