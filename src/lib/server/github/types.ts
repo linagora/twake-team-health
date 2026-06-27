@@ -115,9 +115,17 @@ export type FlowStats = {
 
 export type ReviewerLoad = { reviewer: string; prs: number };
 
+/** Automated reviewer (CodeRabbit, CodeScene, Copilot, ...) activity on merged PRs. */
+export type BotActivity = {
+	login: string;
+	reviews: number; // APPROVED + CHANGES_REQUESTED submissions
+	comments: number; // COMMENTED submissions
+};
+
 export type FlowResult = {
 	overall: FlowStats;
 	byMonth: ({ month: string } & FlowStats)[];
 	reviewerLoad: ReviewerLoad[]; // distinct PRs each person reviewed
+	botActivity: BotActivity[]; // automated reviewers, busiest first
 	generatedAt: number;
 };

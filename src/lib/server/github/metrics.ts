@@ -1,7 +1,7 @@
 import { type GraphQL } from './client';
 import { median, std, round, isBugLabel } from './stats';
 import { type Month, monthKey, monthStart, monthEnd, monthStartMs, monthEndMs } from './months';
-import type { Repo, Member, RepoMonth, OpenPr, PrFlow } from './types';
+import type { Repo, Member, RepoMonth, OpenPr, PrFlow, BotActivity } from './types';
 import type { MemberRepoMonthRow, ReviewRepoMonthRow } from '../store/assemble';
 
 // Heavy first:100 search aliases trip GitHub's per-query resource limit beyond
@@ -573,9 +573,14 @@ export async function fetchOpenPullRequests(gql: GraphQL, repos: Repo[]): Promis
 
 /** Merged PRs in the window with their review timeline, for cycle-time + review
  * health. One PrFlow per merged PR. */
-export async function fetchPrFlow(gql: GraphQL, repos: Repo[], months: Month[]): Promise<PrFlow[]> {
-	if (!months.length || !repos.length) return [];
+export async function fetchPrFlow(
+	gql: GraphQL,
+	repos: Repo[],
+	months: Month[]
+): Promise<{ prs: PrFlow[]; botActivity: BotActivity[] }> {
+	if (!months.length || !repos.length) return { prs: [], botActivity: [] };
 	const out: PrFlow[] = [];
+	const botAcc = new Map<string, BotActivity>(); // bot login -> activity
 	await Promise.all(
 		months.map(async (m) => {
 			const month = monthKey(m);
@@ -594,11 +599,20 @@ export async function fetchPrFlow(gql: GraphQL, repos: Repo[], months: Month[]):
 			repos.forEach(({ owner, repo }, i) => {
 				for (const pr of data[`f${i}`]?.nodes ?? []) {
 					if (!pr?.createdAt || !pr?.mergedAt) continue;
-					// Human reviews only: AI/bot reviewers (CodeRabbit, CodeScene) review
-					// instantly and would skew latency + bury who's actually reviewing.
-					const reviewNodes: any[] = (pr.reviews?.nodes ?? []).filter(
-						(r: any) => r?.submittedAt && r.author?.login && r.author?.__typename !== 'Bot'
+					const submitted: any[] = (pr.reviews?.nodes ?? []).filter(
+						(r: any) => r?.submittedAt && r.author?.login
 					);
+					// Bot reviewers (CodeRabbit, CodeScene, Copilot, ...) are excluded from
+					// human latency stats but tallied here for the Bots page.
+					for (const r of submitted) {
+						if (r.author.__typename !== 'Bot') continue;
+						const b = botAcc.get(r.author.login) ?? { login: r.author.login, reviews: 0, comments: 0 };
+						if (r.state === 'COMMENTED') b.comments += 1;
+						else if (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED') b.reviews += 1;
+						botAcc.set(r.author.login, b);
+					}
+					// Human reviews only: bots review instantly and would skew latency.
+					const reviewNodes: any[] = submitted.filter((r: any) => r.author?.__typename !== 'Bot');
 					const times = reviewNodes.map((r) => r.submittedAt).sort();
 					// Gating approval = the LAST approval at/before merge, not the first:
 					// an early approve followed by more changes and a re-approve must keep
@@ -622,5 +636,8 @@ export async function fetchPrFlow(gql: GraphQL, repos: Repo[], months: Month[]):
 			});
 		})
 	);
-	return out;
+	const botActivity = [...botAcc.values()].sort(
+		(a, b) => b.reviews + b.comments - (a.reviews + a.comments)
+	);
+	return { prs: out, botActivity };
 }
