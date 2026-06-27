@@ -3,17 +3,18 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
+	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
-	import { Check, Loader2, AlertCircle } from '@lucide/svelte';
+	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert } from '@lucide/svelte';
 
 	let { data } = $props();
 
-	// One-shot editor: snapshot the loaded settings into form state (the page
-	// reloads on navigation), so read the prop non-reactively via untrack.
+	// One-shot editor: snapshot the loaded settings into form state.
 	const { settings: s, repos: discoverRepos } = untrack(() => data);
 	const initialKeys = s.globalRepos.map(repoKey);
 	const discoverable = discoverRepos.map(repoKey);
+	const repoOptions = [...new Set([...discoverable, ...initialKeys])].sort();
 
 	let globalMonths = $state(s.globalMonths);
 	let defaultMonths = $state(s.defaultMonths);
@@ -27,18 +28,6 @@
 	let saved = $state(false);
 	let err = $state('');
 
-	// Options = everything discoverable plus anything already selected (so a repo
-	// configured before it left discovery still shows).
-	const repoOptions = [...new Set([...discoverable, ...initialKeys])].sort();
-
-	const windowFields = [
-		{ label: 'Global window (months)', get: () => globalMonths, set: (v: number) => (globalMonths = v) },
-		{ label: 'Default window (months)', get: () => defaultMonths, set: (v: number) => (defaultMonths = v) },
-		{ label: 'Member window (months)', get: () => defaultMemberMonths, set: (v: number) => (defaultMemberMonths = v) }
-	];
-
-	// Curated Signals targets (the "warn" line for the headline metrics); the rest
-	// of the Targets keep their defaults.
 	const targetFields: { key: keyof typeof signals; label: string }[] = [
 		{ key: 'firstReviewWarnH', label: 'First review within (h)' },
 		{ key: 'cycleWarnH', label: 'Cycle time within (h)' },
@@ -48,57 +37,60 @@
 		{ key: 'reviewShareWarnPct', label: 'Review-load imbalance at (%)' }
 	];
 
-	const attentionFields = [
-		{ label: 'PR stale after (days)', get: () => attentionStaleDays, set: (v: number) => (attentionStaleDays = v) },
-		{ label: 'PR aging after (days)', get: () => attentionAgingDays, set: (v: number) => (attentionAgingDays = v) }
-	];
+	const inputCls =
+		'h-9 w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 text-sm tabular transition-colors focus:border-[var(--color-brand)] focus:outline-none';
 
-	async function save() {
+	const onsubmit = () => {
 		saving = true;
 		saved = false;
 		err = '';
-		const res = await fetch('/api/config', {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				globalRepos: repoKeys.map(parseRepoKey),
-				globalMonths,
-				defaultMonths,
-				defaultMemberMonths,
-				attentionStaleDays,
-				attentionAgingDays,
-				signals
-			})
+		return async ({ result, update }: { result: { type: string; data?: any }; update: (o?: { reset?: boolean }) => Promise<void> }) => {
+			saving = false;
+			if (result.type === 'success' && result.data?.saved) {
+				const sv = result.data.saved;
+				// Reflect the normalized values the server actually stored.
+				globalMonths = sv.globalMonths;
+				defaultMonths = sv.defaultMonths;
+				defaultMemberMonths = sv.defaultMemberMonths;
+				attentionStaleDays = sv.attentionStaleDays;
+				attentionAgingDays = sv.attentionAgingDays;
+				signals = { ...sv.signals };
+				repoKeys = sv.globalRepos.map(repoKey);
+				saved = true;
+			} else if (result.type === 'failure') {
+				err = result.data?.error ?? 'Save failed';
+			} else if (result.type === 'error') {
+				err = 'Save failed';
+			}
+			await update({ reset: false });
+		};
+	};
+
+	// The repo multi-select is a custom component, so inject its value into the
+	// submitted form data; the scalar fields submit natively via their name.
+	const enhancer = (formEl: HTMLFormElement) =>
+		enhance(formEl, ({ formData }) => {
+			for (const r of repoKeys) formData.append('repos', r);
+			return onsubmit();
 		});
-		saving = false;
-		if (res.ok) {
-			// Reflect the normalized values the server actually stored (windows are
-			// clamped, repos allowlist-filtered), so the form can't show a value that
-			// wasn't saved.
-			const saved2 = await res.json();
-			globalMonths = saved2.globalMonths;
-			defaultMonths = saved2.defaultMonths;
-			defaultMemberMonths = saved2.defaultMemberMonths;
-			attentionStaleDays = saved2.attentionStaleDays;
-			attentionAgingDays = saved2.attentionAgingDays;
-			signals = { ...saved2.signals };
-			repoKeys = saved2.globalRepos.map(repoKey);
-			saved = true;
-		} else {
-			err = `${res.status}: ${(await res.text()).slice(0, 200)}`;
-		}
-	}
 </script>
 
-<Topbar eyebrow="Settings" title="App configuration" subtitle="Org-wide defaults, editable without a redeploy. Empty values fall back to the environment configuration." />
+<Topbar
+	eyebrow="Settings"
+	title="App configuration"
+	subtitle="Org-wide defaults and thresholds, editable without a redeploy. Empty values fall back to the environment configuration."
+/>
 
-<div class="max-w-2xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-	<Card.Root class="gap-6 p-6 shadow-sm">
-		<!-- Global repos -->
-		<div>
-			<div class="font-display text-lg leading-none">Global repositories</div>
-			<div class="mt-1.5 text-xs text-[var(--color-ink-600)]">Repositories aggregated in the Global view.</div>
-			<div class="mt-3">
+<form method="POST" use:enhancer>
+	<div class="mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pt-10">
+		<!-- Scope -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<GitBranch class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Global scope</h2>
+			</div>
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">Repositories aggregated in the Global trends view.</p>
+			<div class="mt-4">
 				<Select.Root type="multiple" bind:value={repoKeys}>
 					<Select.Trigger class="h-9 w-full bg-[var(--color-card)]">
 						{repoKeys.length ? `${repoKeys.length} repositories selected` : 'Select repositories'}
@@ -110,71 +102,72 @@
 					</Select.Content>
 				</Select.Root>
 			</div>
-		</div>
+		</Card.Root>
 
-		<!-- Windows -->
-		<div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-			{#each windowFields as f (f.label)}
-				<label class="block">
-					<span class="eyebrow mb-2 block">{f.label}</span>
-					<input
-						type="number"
-						min="1"
-						max="36"
-						value={f.get()}
-						oninput={(e) => f.set(Number(e.currentTarget.value))}
-						class="h-9 w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 text-sm tabular"
-					/>
-				</label>
-			{/each}
-		</div>
-
-		<!-- Health targets (Signals) -->
-		<div class="border-t border-[var(--color-ink-200)] pt-5">
-			<div class="font-display text-lg leading-none">Health targets</div>
-			<div class="mt-1.5 text-xs text-[var(--color-ink-600)]">
-				The "good vs needs attention" lines on the Signals page.
+		<!-- Time windows -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<CalendarRange class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Time windows</h2>
 			</div>
-			<div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">Default ranges new visitors see, in months.</p>
+			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+				<label class="block">
+					<span class="eyebrow mb-2 block">Global window</span>
+					<input class={inputCls} type="number" name="globalMonths" min="1" max="36" bind:value={globalMonths} />
+				</label>
+				<label class="block">
+					<span class="eyebrow mb-2 block">Default window</span>
+					<input class={inputCls} type="number" name="defaultMonths" min="1" max="36" bind:value={defaultMonths} />
+				</label>
+				<label class="block">
+					<span class="eyebrow mb-2 block">Member window</span>
+					<input class={inputCls} type="number" name="defaultMemberMonths" min="1" max="36" bind:value={defaultMemberMonths} />
+				</label>
+			</div>
+		</Card.Root>
+
+		<!-- Health targets -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<Activity class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Health targets</h2>
+			</div>
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">The "good vs needs attention" lines on the Signals page.</p>
+			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 				{#each targetFields as f (f.key)}
 					<label class="block">
 						<span class="eyebrow mb-2 block">{f.label}</span>
-						<input
-							type="number"
-							min="0"
-							bind:value={signals[f.key]}
-							class="h-9 w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 text-sm tabular"
-						/>
+						<input class={inputCls} type="number" name={`signal.${f.key}`} min="0" bind:value={signals[f.key]} />
 					</label>
 				{/each}
 			</div>
-		</div>
+		</Card.Root>
 
 		<!-- Attention windows -->
-		<div class="border-t border-[var(--color-ink-200)] pt-5">
-			<div class="font-display text-lg leading-none">Attention windows</div>
-			<div class="mt-1.5 text-xs text-[var(--color-ink-600)]">
-				When an open PR is flagged stale or aging on the Attention page.
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<TriangleAlert class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Attention windows</h2>
 			</div>
-			<div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-				{#each attentionFields as f (f.label)}
-					<label class="block">
-						<span class="eyebrow mb-2 block">{f.label}</span>
-						<input
-							type="number"
-							min="1"
-							max="365"
-							value={f.get()}
-							oninput={(e) => f.set(Number(e.currentTarget.value))}
-							class="h-9 w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2.5 text-sm tabular"
-						/>
-					</label>
-				{/each}
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">When an open PR is flagged stale or aging.</p>
+			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<label class="block">
+					<span class="eyebrow mb-2 block">PR stale after (days)</span>
+					<input class={inputCls} type="number" name="attentionStaleDays" min="1" max="365" bind:value={attentionStaleDays} />
+				</label>
+				<label class="block">
+					<span class="eyebrow mb-2 block">PR aging after (days)</span>
+					<input class={inputCls} type="number" name="attentionAgingDays" min="1" max="365" bind:value={attentionAgingDays} />
+				</label>
 			</div>
-		</div>
+		</Card.Root>
+	</div>
 
-		<div class="flex items-center gap-3 border-t border-[var(--color-ink-200)] pt-4">
-			<Button onclick={save} disabled={saving} size="lg">
+	<!-- Sticky save bar -->
+	<div class="sticky bottom-0 border-t border-[var(--color-ink-200)] bg-[var(--color-ink-0)]/85 backdrop-blur-xl">
+		<div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-10">
+			<Button type="submit" disabled={saving} size="lg">
 				{#if saving}<Loader2 class="h-4 w-4 animate-spin" />{/if} Save changes
 			</Button>
 			{#if saved}
@@ -187,6 +180,7 @@
 					<AlertCircle class="h-4 w-4" /> {err}
 				</span>
 			{/if}
+			<span class="ml-auto text-[11px] text-[var(--color-ink-500)]">Saved values are normalized (clamped & allowlisted).</span>
 		</div>
-	</Card.Root>
-</div>
+	</div>
+</form>
