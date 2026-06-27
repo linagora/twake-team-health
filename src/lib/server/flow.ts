@@ -2,7 +2,7 @@ import { graphql, type GraphQL } from './github/client';
 import { fetchPrFlow } from './github/metrics';
 import { lastNMonths, monthsEndingAt, monthKey } from './github/months';
 import { median, round } from './github/stats';
-import type { Repo, PrFlow, FlowStats, FlowResult } from './github/types';
+import type { Repo, PrFlow, FlowStats, FlowResult, BotActivity } from './github/types';
 
 const HOUR = 3_600_000;
 const med = (xs: number[]) => (xs.length ? round(median(xs), 1) : 0);
@@ -30,12 +30,17 @@ function statsFor(prs: PrFlow[]): FlowStats {
 }
 
 /** Aggregate cycle-time + review health from per-PR flow records. Pure. */
-export function computeFlow(prs: PrFlow[], months: string[], now: number): FlowResult {
+export function computeFlow(
+	prs: PrFlow[],
+	months: string[],
+	now: number,
+	botActivity: BotActivity[] = []
+): FlowResult {
 	const byMonth = months.map((month) => ({ month, ...statsFor(prs.filter((p) => p.month === month)) }));
 	const load = new Map<string, number>();
 	for (const p of prs) for (const r of p.reviewers) load.set(r, (load.get(r) ?? 0) + 1);
 	const reviewerLoad = [...load.entries()].map(([reviewer, n]) => ({ reviewer, prs: n })).sort((a, b) => b.prs - a.prs);
-	return { overall: statsFor(prs), byMonth, reviewerLoad, generatedAt: now };
+	return { overall: statsFor(prs), byMonth, reviewerLoad, botActivity, generatedAt: now };
 }
 
 export async function getFlowReport(
@@ -46,6 +51,6 @@ export async function getFlowReport(
 	gql: GraphQL = graphql
 ): Promise<FlowResult> {
 	const ms = to ? monthsEndingAt(to, months) : lastNMonths(months, now);
-	const prs = await fetchPrFlow(gql, repos, ms);
-	return computeFlow(prs, ms.map(monthKey), now.getTime());
+	const { prs, botActivity } = await fetchPrFlow(gql, repos, ms);
+	return computeFlow(prs, ms.map(monthKey), now.getTime(), botActivity);
 }

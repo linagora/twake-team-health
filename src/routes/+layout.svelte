@@ -33,6 +33,7 @@
 		if (p.startsWith('/global')) return 'Global trends';
 		if (p.startsWith('/breakdown')) return 'Breakdown';
 		if (p.startsWith('/teams')) return 'Teams';
+		if (p.startsWith('/bots')) return 'Bots';
 		if (p.startsWith('/settings')) return 'Settings';
 		if (p.startsWith('/charts')) return 'Charts';
 		if (p.startsWith('/auth')) return 'Sign in';

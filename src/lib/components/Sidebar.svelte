@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers, Cog, Activity } from '@lucide/svelte';
+	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers, Cog, Activity, Bot } from '@lucide/svelte';
 	import linagoraLogo from '$lib/assets/linagora-logo.svg';
 	import twakeLogo from '$lib/assets/twake-logo.svg';
 
@@ -17,7 +17,8 @@
 		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '06' },
 		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '07' },
 		{ href: '/teams', label: 'Teams', icon: Users, kbd: '08' },
-		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '09' }] : [])
+		{ href: '/bots', label: 'Bots', icon: Bot, kbd: '09' },
+		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '10' }] : [])
 	]);
 </script>
 
