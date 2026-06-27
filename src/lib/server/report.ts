@@ -137,17 +137,26 @@ async function resolveRepoAndReview(
 
 	let fetchError: unknown;
 	if (stale.length) {
-		try {
-			const [repoRows, reviewRowsNew] = await Promise.all([
-				fetchRepoMonthRows(gql, repos, stale),
-				fetchReviewRepoMonthRows(gql, repos, stale)
-			]);
-			await Promise.all([store.upsertRepoMonths(repoRows), store.upsertReviewRepoMonths(reviewRowsNew)]);
-		} catch (e) {
-			// Degrade gracefully: a failed refresh (e.g. rate limit) shouldn't sink the
-			// whole report when the store already holds usable (if slightly stale) data.
-			fetchError = e;
-			console.warn(`[report] repo refresh failed, serving stored data: ${(e as Error).message}`);
+		// Fetch + persist per repo so a mid-refresh failure (e.g. a rate limit) keeps
+		// the repos that already completed; the next pass retries only the rest,
+		// instead of an all-or-nothing batch that loses everything on one blip.
+		const results = await Promise.allSettled(
+			repos.map(async (repo) => {
+				const [repoRows, reviewRowsNew] = await Promise.all([
+					fetchRepoMonthRows(gql, [repo], stale),
+					fetchReviewRepoMonthRows(gql, [repo], stale)
+				]);
+				await Promise.all([
+					store.upsertRepoMonths(repoRows),
+					store.upsertReviewRepoMonths(reviewRowsNew)
+				]);
+			})
+		);
+		const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+		if (failed) {
+			// Some repos failed; the report still serves what persisted (stored rows).
+			fetchError = failed.reason;
+			console.warn(`[report] repo refresh partial, serving stored data: ${(failed.reason as Error).message}`);
 		}
 		// Re-read only after a refresh; the warm path uses the rows already read.
 		[repoRead, reviewRows] = await Promise.all([
@@ -182,12 +191,17 @@ async function resolveMembers(
 	);
 
 	if (stale.length) {
-		try {
-			const fetched = await fetchMemberRepoMonthRows(gql, repos, members, stale);
-			await store.upsertMemberRepoMonths(fillMemberGrid(members, repos, stale, fetched));
-		} catch (e) {
+		// Per-repo fetch + persist so a partial failure keeps the repos that finished.
+		const results = await Promise.allSettled(
+			repos.map(async (repo) => {
+				const fetched = await fetchMemberRepoMonthRows(gql, [repo], members, stale);
+				await store.upsertMemberRepoMonths(fillMemberGrid(members, [repo], stale, fetched));
+			})
+		);
+		const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+		if (failed) {
 			// Member stats are non-essential; never let a failed refresh sink the report.
-			console.warn(`[report] member refresh failed, serving stored data: ${(e as Error).message}`);
+			console.warn(`[report] member refresh partial, serving stored data: ${(failed.reason as Error).message}`);
 		}
 		// Re-read only after a refresh; the warm path uses the rows already read.
 		rows = (await store.getMemberRepoMonthsWithFetchedAt(logins, repos, keys)).rows;
