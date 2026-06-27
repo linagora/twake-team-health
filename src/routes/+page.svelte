@@ -9,8 +9,13 @@
 	import { fmtNum, fmtMonth } from '$lib/utils';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown } from '@lucide/svelte';
 
-	const stats = $derived(metrics.data);
-	const team = $derived(scope.activeTeam);
+	let { data } = $props();
+
+	// Fall back to the server-rendered default metrics until the client store loads,
+	// so the first paint shows data instead of a spinner. Resolve member names from
+	// the default team during SSR too (the scope store is client-only).
+	const stats = $derived(metrics.data ?? data.initial);
+	const team = $derived(scope.activeTeam ?? data.defaultTeams?.[0]);
 
 	const totalMonthly = $derived.by(() => {
 		const byMonth = new Map<string, { created: number; merged: number; bugs: number; issues: number }>();
