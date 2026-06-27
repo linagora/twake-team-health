@@ -10,6 +10,7 @@ import { parseRepos } from './validate';
 import { allowedOrgs } from './discovery';
 import { DEFAULT_MONTHS, DEFAULT_MEMBER_MONTHS, GLOBAL_MONTHS, defaultGlobalRepos } from './preset';
 import { DEFAULT_TARGETS, type Targets } from '$lib/signals';
+import { setMaxConcurrency } from './github/limits';
 import type { Repo } from './github/types';
 
 export type AppSettings = {
@@ -21,6 +22,8 @@ export type AppSettings = {
 	signals: Targets;
 	attentionStaleDays: number;
 	attentionAgingDays: number;
+	// Max in-flight GitHub GraphQL calls (lower = gentler on the rate limit).
+	fetchConcurrency: number;
 };
 
 const CONFIG_ID = 'app';
@@ -36,7 +39,8 @@ function envSettings(): AppSettings {
 		defaultMemberMonths: DEFAULT_MEMBER_MONTHS,
 		signals: DEFAULT_TARGETS,
 		attentionStaleDays: Number(env.ATTENTION_STALE_DAYS ?? 7),
-		attentionAgingDays: Number(env.ATTENTION_AGING_DAYS ?? 14)
+		attentionAgingDays: Number(env.ATTENTION_AGING_DAYS ?? 14),
+		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8
 	};
 }
 
@@ -86,6 +90,8 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	const ad = days(o.attentionAgingDays);
 	if (sd) out.attentionStaleDays = sd;
 	if (ad) out.attentionAgingDays = ad;
+	const fc = Number(o.fetchConcurrency);
+	if (Number.isInteger(fc) && fc >= 1 && fc <= 32) out.fetchConcurrency = fc;
 	return out;
 }
 
@@ -93,20 +99,26 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
  * A failed DB read returns env defaults WITHOUT caching, so a transient outage
  * can't mask a recovered DB (and freshly-saved overrides) for the full TTL. */
 export async function getAppSettings(): Promise<AppSettings> {
-	if (cache && cache.expires > Date.now()) return cache.value;
+	if (cache && cache.expires > Date.now()) {
+		setMaxConcurrency(cache.value.fetchConcurrency);
+		return cache.value;
+	}
 	const base = envSettings();
-	if (!hasDb()) {
+	let value = base;
+	if (hasDb()) {
+		try {
+			const [row] = await db().select().from(appConfig).where(eq(appConfig.id, CONFIG_ID));
+			value = row?.value ? { ...base, ...sanitize(row.value as Record<string, unknown>) } : base;
+			cache = { value, expires: Date.now() + TTL_MS };
+		} catch {
+			value = base; // not cached: retry on the next call
+		}
+	} else {
 		cache = { value: base, expires: Date.now() + TTL_MS };
-		return base;
 	}
-	try {
-		const [row] = await db().select().from(appConfig).where(eq(appConfig.id, CONFIG_ID));
-		const value = row?.value ? { ...base, ...sanitize(row.value as Record<string, unknown>) } : base;
-		cache = { value, expires: Date.now() + TTL_MS };
-		return value;
-	} catch {
-		return base; // not cached: retry on the next call
-	}
+	// Push the effective cap to the GraphQL client so it takes effect at runtime.
+	setMaxConcurrency(value.fetchConcurrency);
+	return value;
 }
 
 /** Persist admin overrides (validated). Returns the new effective settings. */

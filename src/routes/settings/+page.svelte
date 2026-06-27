@@ -6,7 +6,7 @@
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
-	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert } from '@lucide/svelte';
+	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -21,12 +21,16 @@
 	let defaultMemberMonths = $state(s.defaultMemberMonths);
 	let attentionStaleDays = $state(s.attentionStaleDays);
 	let attentionAgingDays = $state(s.attentionAgingDays);
+	let fetchConcurrency = $state(s.fetchConcurrency);
 	let signals = $state({ ...s.signals });
 	let repoKeys = $state<string[]>([...initialKeys]);
 
 	let saving = $state(false);
 	let saved = $state(false);
 	let err = $state('');
+
+	let refreshing = $state(false);
+	let refreshMsg = $state('');
 
 	const targetFields: { key: keyof typeof signals; label: string }[] = [
 		{ key: 'firstReviewWarnH', label: 'First review within (h)' },
@@ -54,6 +58,7 @@
 				defaultMemberMonths = sv.defaultMemberMonths;
 				attentionStaleDays = sv.attentionStaleDays;
 				attentionAgingDays = sv.attentionAgingDays;
+				fetchConcurrency = sv.fetchConcurrency;
 				signals = { ...sv.signals };
 				repoKeys = sv.globalRepos.map(repoKey);
 				saved = true;
@@ -73,6 +78,22 @@
 			for (const r of repoKeys) formData.append('repos', r);
 			return onsubmit();
 		});
+
+	// Separate form for the (slow) refresh action so it has its own spinner/status.
+	const refreshEnhancer = (formEl: HTMLFormElement) =>
+		enhance(formEl, () => {
+			refreshing = true;
+			refreshMsg = '';
+			return async ({ result, update }: { result: { type: string; data?: any }; update: (o?: { reset?: boolean }) => Promise<void> }) => {
+				refreshing = false;
+				if (result.type === 'success' && result.data?.refresh?.started) {
+					refreshMsg = 'Refresh started — data is warming in the background.';
+				} else {
+					refreshMsg = `Refresh failed: ${result.data?.error ?? result.type}`;
+				}
+				await update({ reset: false });
+			};
+		});
 </script>
 
 <Topbar
@@ -81,7 +102,7 @@
 	subtitle="Org-wide defaults and thresholds, editable without a redeploy. Empty values fall back to the environment configuration."
 />
 
-<form method="POST" use:enhancer>
+<form method="POST" action="?/save" use:enhancer>
 	<div class="mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pt-10">
 		<!-- Scope -->
 		<Card.Root class="gap-0 p-6 shadow-sm">
@@ -162,6 +183,23 @@
 				</label>
 			</div>
 		</Card.Root>
+
+		<!-- Fetching -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<Server class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Fetching</h2>
+			</div>
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
+				Max simultaneous GitHub calls. Lower is gentler on the rate limit; raise it for speed.
+			</p>
+			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<label class="block">
+					<span class="eyebrow mb-2 block">Fetch concurrency (1–32)</span>
+					<input class={inputCls} type="number" name="fetchConcurrency" min="1" max="32" bind:value={fetchConcurrency} />
+				</label>
+			</div>
+		</Card.Root>
 	</div>
 
 	<!-- Sticky save bar -->
@@ -184,3 +222,27 @@
 		</div>
 	</div>
 </form>
+
+<!-- Maintenance (separate action; forms can't nest) -->
+<div class="mx-auto max-w-3xl px-4 pb-28 sm:px-6 lg:px-10">
+	<Card.Root class="gap-0 p-6 shadow-sm">
+		<div class="flex items-center gap-2.5">
+			<RefreshCw class="h-4 w-4 text-[var(--color-brand)]" />
+			<h2 class="font-display text-lg leading-none">Maintenance</h2>
+		</div>
+		<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
+			Re-fetch the current month and any missing months for the default teams and Global view.
+		</p>
+		<form method="POST" action="?/refresh" use:refreshEnhancer class="mt-4 flex items-center gap-3">
+			<Button type="submit" variant="outline" disabled={refreshing}>
+				{#if refreshing}<Loader2 class="h-4 w-4 animate-spin" />{:else}<RefreshCw class="h-4 w-4" />{/if}
+				Refresh data now
+			</Button>
+			{#if refreshMsg}
+				<span class="inline-flex items-center gap-1.5 text-sm text-[var(--color-ink-700)]">
+					<Check class="h-4 w-4 text-[var(--color-positive)]" /> {refreshMsg}
+				</span>
+			{/if}
+		</form>
+	</Card.Root>
+</div>

@@ -117,6 +117,7 @@ export const handle: Handle = AUTH_DISABLED
 // Capture unexpected (5xx) errors with their message into the event log, and
 // return a safe message so internals never reach the client.
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
+	if (status >= 500) console.error(`[error] ${status} ${event.url.pathname}`, error);
 	const user = event.locals.user;
 	void logEvent({
 		userSub: user?.sub ?? 'anonymous',

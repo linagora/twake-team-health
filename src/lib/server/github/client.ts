@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { getMaxConcurrency } from './limits';
 
 const ENDPOINT = 'https://api.github.com/graphql';
 const RETRY_DELAYS_MS = [0, 1000, 3000, 8000];
@@ -6,10 +7,6 @@ const RETRY_DELAYS_MS = [0, 1000, 3000, 8000];
 // doesn't send a Retry-After. Coordinated so a burst self-throttles instead of
 // every call retrying into the same wall.
 const SECONDARY_COOLDOWN_MS = 20_000;
-// Shared cap on in-flight GraphQL calls (protects the read-only token from
-// secondary rate limits). `|| 8` guards against a non-numeric env value, which
-// would otherwise be NaN and deadlock acquire().
-const MAX_CONCURRENCY = Number(env.GITHUB_MAX_CONCURRENCY) || 8;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -26,11 +23,11 @@ function rateLimitResetMs(res: Response): number {
 }
 
 // A tiny semaphore so the shared read-only token is never hammered with more
-// than MAX_CONCURRENCY in-flight GraphQL calls, even under concurrent users.
+// than the configured cap of in-flight GraphQL calls, even under concurrent users.
 let active = 0;
 const waiters: Array<() => void> = [];
 async function acquire(): Promise<void> {
-	if (active < MAX_CONCURRENCY) {
+	if (active < getMaxConcurrency()) {
 		active++;
 		return;
 	}
