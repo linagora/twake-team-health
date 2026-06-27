@@ -5,6 +5,7 @@
 	import { attention } from '$lib/client/attention.svelte';
 	import { fmtNum } from '$lib/utils';
 	import { AlertCircle, Loader2, ExternalLink, CheckCircle2 } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 	import type { AttentionReason } from '$lib/server/github/types';
 
 	const team = $derived(scope.activeTeam);
@@ -102,7 +103,7 @@
 							</div>
 							<div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-[var(--color-ink-600)]">
 								<span class="text-[var(--color-ink-800)]">{it.repo} #{it.number}</span>
-								<span>{it.author}</span>
+								<span class="inline-flex items-center gap-1.5"><Avatar login={it.author} name={it.author} size={14} />{it.author}</span>
 								<span>opened {it.ageDays}d ago</span>
 								{#if it.idleDays >= 1}<span>idle {it.idleDays}d</span>{/if}
 								<span>
