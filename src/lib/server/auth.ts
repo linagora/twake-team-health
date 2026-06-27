@@ -8,34 +8,26 @@ import { dev } from '$app/environment';
 // silently exposing everything as the synthetic dev user.
 export const AUTH_DISABLED = env.AUTH_DISABLED === 'true' || (!env.OIDC_ISSUER && dev);
 
-// Admins (allowed to edit app-wide settings) are listed by OIDC subject in
-// ADMIN_SUBS. With auth disabled the synthetic dev user is treated as admin so
-// local dev can use the settings UI; in prod with no ADMIN_SUBS, nobody is admin
-// (settings stay read-only), which preserves the current env-only behavior.
-export function isAdmin(sub: string | undefined | null): boolean {
-	if (AUTH_DISABLED) return true;
-	if (!sub) return false;
-	return (env.ADMIN_SUBS ?? '')
-		.split(',')
-		.map((s) => s.trim())
-		.filter(Boolean)
-		.includes(sub);
-}
+type UserRef = { sub?: string | null; email?: string | null } | null | undefined;
 
-// Who may view the per-user event/abuse log. Listed by email OR OIDC subject in
-// LOG_VIEWERS (so the list can be human-readable emails). With auth disabled the
-// dev user can view; in prod with LOG_VIEWERS unset, nobody can (fail closed).
-export function canViewLogs(user: { sub?: string | null; email?: string | null } | null | undefined): boolean {
-	if (AUTH_DISABLED) return true;
-	if (!user) return false;
-	const allow = (env.LOG_VIEWERS ?? '')
+function inAllowlist(user: UserRef, listEnv: string | undefined, matchEmail = true): boolean {
+	const allow = (listEnv ?? '')
 		.split(',')
 		.map((s) => s.trim().toLowerCase())
 		.filter(Boolean);
-	if (!allow.length) return false;
+	if (!allow.length || !user) return false;
 	const sub = user.sub?.toLowerCase();
 	const email = user.email?.toLowerCase();
-	return (!!sub && allow.includes(sub)) || (!!email && allow.includes(email));
+	return (!!sub && allow.includes(sub)) || (matchEmail && !!email && allow.includes(email));
+}
+
+// Admins gate the settings UI and the activity/log viewer. Listed by email OR
+// OIDC subject in ADMINS (so the list can be human-readable emails); ADMIN_SUBS
+// (subject-only) is kept as a back-compat fallback. With auth disabled the dev
+// user is admin; in prod with neither set, nobody is admin (fail closed).
+export function isAdmin(user: UserRef): boolean {
+	if (AUTH_DISABLED) return true;
+	return inAllowlist(user, env.ADMINS) || inAllowlist(user, env.ADMIN_SUBS, false);
 }
 
 // Generic OIDC client pointed at the registration service (authorization code +

@@ -92,7 +92,7 @@
 		></button>
 	{/if}
 
-	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} canViewLogs={data.canViewLogs} />
+	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} />
 
 	<main class="flex-1 min-w-0">
 		<ScopeBar

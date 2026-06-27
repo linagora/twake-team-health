@@ -7,9 +7,8 @@
 	let {
 		open = false,
 		onClose,
-		isAdmin = false,
-		canViewLogs = false
-	}: { open?: boolean; onClose?: () => void; isAdmin?: boolean; canViewLogs?: boolean } = $props();
+		isAdmin = false
+	}: { open?: boolean; onClose?: () => void; isAdmin?: boolean } = $props();
 
 	const nav = $derived([
 		// Big-picture views first (Overview, Global), then team-scoped detail
@@ -23,8 +22,12 @@
 		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '07' },
 		{ href: '/teams', label: 'Teams', icon: Users, kbd: '08' },
 		{ href: '/bots', label: 'Bots', icon: Bot, kbd: '09' },
-		...(canViewLogs ? [{ href: '/logs', label: 'Logs', icon: ScrollText, kbd: '10' }] : []),
-		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '11' }] : [])
+		...(isAdmin
+			? [
+					{ href: '/logs', label: 'Logs', icon: ScrollText, kbd: '10' },
+					{ href: '/settings', label: 'Settings', icon: Cog, kbd: '11' }
+				]
+			: [])
 	]);
 </script>
 

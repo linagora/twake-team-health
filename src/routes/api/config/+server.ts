@@ -5,12 +5,12 @@ import { audit } from '$lib/server/store/audit';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!isAdmin(locals.user.sub)) throw error(403, 'admins only');
+	if (!isAdmin(locals.user)) throw error(403, 'admins only');
 	return json(await getAppSettings());
 };
 
 export const PUT: RequestHandler = async ({ request, locals }) => {
-	if (!isAdmin(locals.user.sub)) throw error(403, 'admins only');
+	if (!isAdmin(locals.user)) throw error(403, 'admins only');
 	const body = await request.json().catch(() => ({}));
 	try {
 		const settings = await setAppSettings(body as Record<string, unknown>);

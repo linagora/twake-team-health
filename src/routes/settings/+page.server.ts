@@ -6,7 +6,7 @@ import type { Repo } from '$lib/server/github/types';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
-	if (!isAdmin(locals.user.sub)) throw error(403, 'Admins only');
+	if (!isAdmin(locals.user)) throw error(403, 'Admins only');
 	let repos: Repo[] = [];
 	try {
 		repos = await listRepos();
