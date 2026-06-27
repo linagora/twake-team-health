@@ -3,6 +3,7 @@
 	import MetricChart from '$lib/components/charts/MetricChart.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { metrics } from '$lib/client/metrics.svelte';
+	import { flow } from '$lib/client/flow.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import {
 		repoSeries,
@@ -53,6 +54,11 @@
 		{ key: 'stock', label: 'Stock', blurb: 'Open backlog at each month end: issues, bugs, and pull requests.' },
 		{ key: 'bug_resolution', label: 'Bug resolution', blurb: 'How quickly bugs were resolved, and the share that got closed.' },
 		{ key: 'releases', label: 'Releases', blurb: 'Published releases shipped each month.' },
+		{ key: 'cycle_time', label: 'Cycle time', blurb: 'Median time from opening a PR to merging it, month by month.' },
+		{ key: 'first_review', label: 'Time to first review', blurb: 'Median wait for a PR to get its first review, month by month.' },
+		{ key: 'review_time', label: 'Review time', blurb: 'Median time in review (first review to merge), month by month.' },
+		{ key: 'after_approval', label: 'After approval', blurb: 'Median wait from approval to merge, month by month.' },
+		{ key: 'review_coverage', label: 'Review coverage', blurb: 'Share of merged PRs that got at least one review, month by month.' },
 		{ key: 'Commits', label: 'Commits', blurb: 'Commits landed by each team member over recent months.' },
 		{ key: 'CommitsByRepo', label: 'Commits by repo', blurb: 'Where each member committed, broken down by repository.' },
 		{ key: 'MergedPRs', label: 'Merged PRs', blurb: 'Pull requests merged by each team member over recent months.' },
@@ -89,6 +95,21 @@
 	const reviews = $derived(stats && activeCategory === 'Reviews' ? reviewActivityChart(stats, config) : []);
 	const tickets = $derived(stats && activeCategory === 'Tickets' ? ticketsChart(stats) : []);
 	const commitsByRepo = $derived(stats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(stats, config) : { repos: [], data: [], members: [] });
+
+	// Team-wide flow metrics over time, drawn from the flow report (not the metrics
+	// report). Loaded lazily when one of these categories is active.
+	const FLOW: Record<string, { field: string; label: string; color: string }> = {
+		cycle_time: { field: 'mergeHours', label: 'Hours', color: 'var(--color-chart-1)' },
+		first_review: { field: 'firstReviewHours', label: 'Hours', color: 'var(--color-chart-3)' },
+		review_time: { field: 'reviewHours', label: 'Hours', color: 'var(--color-chart-2)' },
+		after_approval: { field: 'postApproveHours', label: 'Hours', color: 'var(--color-chart-5)' },
+		review_coverage: { field: 'reviewedPct', label: '% reviewed', color: 'var(--color-chart-4)' }
+	};
+	$effect(() => {
+		if (FLOW[activeCategory] && team?.repos.length)
+			flow.ensure(team.repos, scope.months, scope.to || undefined);
+	});
+	const flowMonths = $derived(flow.data?.byMonth ?? []);
 
 	// Map a set of keys to colored series; `label` formats the displayed name.
 	function keySeries(keys: string[], label: (k: string) => string = (k) => k): SeriesCfg[] {
@@ -206,6 +227,28 @@
 								<MetricChart data={tickets} x="month" series={[{ key: 'tickets', label: 'Tickets', color: 'var(--color-chart-2)' }, { key: 'bugs', label: 'Bugs', color: 'var(--color-chart-4)' }]} kind="bar" seriesLayout="group" class="aspect-[2/1] w-full" />
 							{:else}
 								<div class="py-10 text-center text-sm text-[var(--color-ink-600)]">No ticket data.</div>
+							{/if}
+						</Card.Root>
+					{:else if FLOW[activeCategory]}
+						<Card.Root class="p-7 shadow-sm">
+							{#if !flow.data && flow.loading}
+								<div class="py-10 text-center text-sm text-[var(--color-ink-600)]">Loading…</div>
+							{:else if flowMonths.length}
+								<MetricChart
+									data={flowMonths}
+									x="month"
+									series={[
+										{
+											key: FLOW[activeCategory].field,
+											label: FLOW[activeCategory].label,
+											color: FLOW[activeCategory].color
+										}
+									]}
+									kind="line"
+									class="aspect-[2/1] w-full"
+								/>
+							{:else}
+								<div class="py-10 text-center text-sm text-[var(--color-ink-600)]">No flow data.</div>
 							{/if}
 						</Card.Root>
 					{/if}
