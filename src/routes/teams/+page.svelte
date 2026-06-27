@@ -7,6 +7,16 @@
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
 	import type { Member, Repo } from '$lib/server/github/types';
 	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search } from '@lucide/svelte';
+	import { untrack } from 'svelte';
+
+	let { data } = $props();
+
+	// Teams persist server-side per user when a database is configured, otherwise
+	// they fall back to this browser's localStorage. Say which one is in effect.
+	// teamsPersisted is a fixed server config, so read it non-reactively.
+	const persistenceNote = untrack(() => data.teamsPersisted)
+		? 'Your teams are saved to your account.'
+		: 'Your teams are saved in this browser.';
 
 	$effect(() => {
 		discovery.ensure();
@@ -85,7 +95,7 @@
 	}
 </script>
 
-<Topbar eyebrow="Teams" title="Teams." subtitle="Pick any members and repositories to build a team. Your teams are saved in this browser." />
+<Topbar eyebrow="Teams" title="Teams." subtitle="Pick any members and repositories to build a team. {persistenceNote}" />
 
 <div class="px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
 	<div class="grid grid-cols-12 gap-8">
