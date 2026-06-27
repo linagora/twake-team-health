@@ -47,6 +47,10 @@ export const actions: Actions = {
 				attentionAgingDays: num('attentionAgingDays'),
 				fetchConcurrency: num('fetchConcurrency'),
 				orgName: String(fd.get('orgName') ?? ''),
+				bugLabels: String(fd.get('bugLabels') ?? '')
+					.split(',')
+					.map((s) => s.trim())
+					.filter(Boolean),
 				signals
 			});
 			return { saved };

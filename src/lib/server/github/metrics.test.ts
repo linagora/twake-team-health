@@ -5,7 +5,7 @@ import {
 	reviewCountsFromNodes,
 	pickCommitMember
 } from './metrics';
-import { median, std, isBugLabel } from './stats';
+import { median, std, isBugLabel, makeBugMatcher } from './stats';
 import { lastNMonths, monthKey, monthEnd } from './months';
 
 describe('stats helpers', () => {
@@ -38,6 +38,15 @@ describe('stats helpers', () => {
 		expect(isBugLabel(['enhancement'])).toBe(false);
 		expect(isBugLabel(['debug'])).toBe(false); // not a bug label
 		expect(isBugLabel(['bugfix'])).toBe(false); // a fix, not a bug report
+	});
+
+	it('makeBugMatcher uses a configured list (exact, case-insensitive), else the heuristic', () => {
+		const m = makeBugMatcher(['defect', 'Type: Bug']);
+		expect(m(['defect'])).toBe(true);
+		expect(m(['type: bug'])).toBe(true); // case-insensitive
+		expect(m(['bug'])).toBe(false); // not in the configured list
+		// Empty config falls back to the default heuristic.
+		expect(makeBugMatcher([])(['bug'])).toBe(true);
 	});
 });
 

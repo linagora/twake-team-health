@@ -26,6 +26,8 @@ export type AppSettings = {
 	fetchConcurrency: number;
 	// Optional organization name shown in the sidebar brand.
 	orgName: string;
+	// Label names that mark an issue as a bug; empty = the default word-"bug" heuristic.
+	bugLabels: string[];
 };
 
 const CONFIG_ID = 'app';
@@ -43,7 +45,8 @@ function envSettings(): AppSettings {
 		attentionStaleDays: Number(env.ATTENTION_STALE_DAYS ?? 7),
 		attentionAgingDays: Number(env.ATTENTION_AGING_DAYS ?? 14),
 		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8,
-		orgName: env.ORG_NAME ?? ''
+		orgName: env.ORG_NAME ?? '',
+		bugLabels: []
 	};
 }
 
@@ -96,6 +99,13 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	const fc = Number(o.fetchConcurrency);
 	if (Number.isInteger(fc) && fc >= 1 && fc <= 32) out.fetchConcurrency = fc;
 	if (typeof o.orgName === 'string') out.orgName = o.orgName.trim().slice(0, 60);
+	if (Array.isArray(o.bugLabels)) {
+		out.bugLabels = o.bugLabels
+			.filter((l): l is string => typeof l === 'string')
+			.map((l) => l.trim().slice(0, 40))
+			.filter(Boolean)
+			.slice(0, 30);
+	}
 	return out;
 }
 

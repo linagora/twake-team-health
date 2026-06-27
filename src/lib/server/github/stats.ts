@@ -26,7 +26,15 @@ export function std(xs: number[]): number {
 // Match "bug"/"bugs" as a whole word (also "type:bug", "kind/bug"), but not
 // substrings like "debug" or "bugfix" that a plain includes('bug') over-counts.
 const BUG_LABEL_RE = /(^|[^a-z])bugs?([^a-z]|$)/i;
-/** Whether any label marks the issue as a bug. */
+/** Whether any label marks the issue as a bug (default heuristic). */
 export function isBugLabel(labels: string[]): boolean {
 	return labels.some((l) => BUG_LABEL_RE.test(l));
+}
+
+/** A bug-label matcher: exact case-insensitive match against an admin-configured
+ * list, or the default heuristic when the list is empty. */
+export function makeBugMatcher(configured: string[]): (labels: string[]) => boolean {
+	if (!configured.length) return isBugLabel;
+	const set = new Set(configured.map((l) => l.toLowerCase()));
+	return (labels) => labels.some((l) => set.has(l.toLowerCase()));
 }

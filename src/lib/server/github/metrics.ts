@@ -1,5 +1,5 @@
 import { type GraphQL } from './client';
-import { median, std, round, isBugLabel } from './stats';
+import { median, std, round, isBugLabel, makeBugMatcher } from './stats';
 import { type Month, monthKey, monthStart, monthEnd, monthStartMs, monthEndMs } from './months';
 import type { Repo, Member, RepoMonth, OpenPr, PrFlow, BotActivity, BotMonthActivity } from './types';
 import type { MemberRepoMonthRow, ReviewRepoMonthRow } from '../store/assemble';
@@ -89,13 +89,14 @@ type IssueNode = {
 
 export function issueStatsForMonth(
 	opened: { issueCount: number; nodes: IssueNode[] },
-	closedCount: number
+	closedCount: number,
+	isBug: (labels: string[]) => boolean = isBugLabel
 ): { opened: number; closed: number; bugs: number; resolutionDays: number; resolutionStd: number; resolutionRate: number } {
 	let bugs = 0;
 	const resolutionDaysList: number[] = [];
 	for (const issue of opened.nodes) {
 		const labels = issue.labels.nodes.map((l) => l.name);
-		if (isBugLabel(labels)) {
+		if (isBug(labels)) {
 			bugs += 1;
 			if (issue.closedAt) {
 				resolutionDaysList.push(
@@ -220,7 +221,16 @@ function issueAliasBlock(owner: string, repo: string, m: Month, i: number): stri
     closed_${i}: search(query: "repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}", type: ISSUE, first: 1) { issueCount }`;
 }
 
-function stockAliasBlock(owner: string, repo: string, m: Month, i: number): string {
+// GitHub search `label:` OR-list from configured names (default to the common
+// bug variants when none set). Values with spaces/colons are quoted, escaped for
+// the surrounding GraphQL string. Search is label-exact, so this is the closest
+// approximation of the bug matcher for the cumulative stock counts.
+function bugLabelSearch(configured: string[]): string {
+	const labels = configured.length ? configured : ['bug', 'bugs', 'type: bug', 'type:bug', 'kind/bug'];
+	return 'label:' + labels.map((l) => (/[\s:]/.test(l) ? `\\"${l}\\"` : l)).join(',');
+}
+
+function stockAliasBlock(owner: string, repo: string, m: Month, i: number, bugLabels: string): string {
 	// Snapshot "as of" the month end, but never a future date: for the in-progress
 	// month, clamp to today so open/stale counts aren't measured against the future.
 	const today = new Date().toISOString().slice(0, 10);
@@ -229,10 +239,6 @@ function stockAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 	const w = new Date(Date.parse(d) - 7 * DAY_MS).toISOString().slice(0, 10);
 	const r = (q: string, alias: string) =>
 		`${alias}_${i}: search(query: "repo:${owner}/${repo} ${q}", type: ISSUE, first: 1) { issueCount }`;
-	// Open-bug stock counts can't run the isBugLabel regex (search is label-exact),
-	// so OR the common bug-label variants it matches. Approximate (won't catch
-	// every custom form) but far closer than the literal `label:bug` alone.
-	const bugLabels = `label:bug,bugs,\\"type: bug\\",\\"type:bug\\",kind/bug`;
 	return [
 		r(`type:issue created:<=${d}`, 'i_open'),
 		r(`type:issue closed:<=${d}`, 'i_closed'),
@@ -245,11 +251,18 @@ function stockAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 	].join('\n');
 }
 
-async function fetchRepoSeries(gql: GraphQL, { owner, repo }: Repo, months: Month[]): Promise<RepoMonth[]> {
+async function fetchRepoSeries(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	months: Month[],
+	bugLabels: string[] = []
+): Promise<RepoMonth[]> {
+	const isBug = makeBugMatcher(bugLabels);
+	const bugSearch = bugLabelSearch(bugLabels);
 	const prBlocks = months.map((m, i) => prAliasBlock(owner, repo, m, i));
 	const issueBlocks = months.map((m, i) => issueAliasBlock(owner, repo, m, i));
 	// Stock aliases are first:1 (cheap); 8 per month is fine in larger chunks.
-	const stockBlocks = months.map((m, i) => stockAliasBlock(owner, repo, m, i));
+	const stockBlocks = months.map((m, i) => stockAliasBlock(owner, repo, m, i, bugSearch));
 
 	const [prData, issueData, stockData, releaseCounts] = await Promise.all([
 		runChunkedAliases(gql, prBlocks),
@@ -276,7 +289,7 @@ async function fetchRepoSeries(gql: GraphQL, { owner, repo }: Repo, months: Mont
 			? await drainSearchNodes(gql, openedIssueQuery(owner, repo, m), ISSUE_NODE_FIELDS, openedRaw)
 			: (openedRaw.nodes ?? []);
 		const pr = prStatsForMonth({ issueCount: mergedRaw.issueCount ?? 0, nodes: mergedNodes }, prData[`created_${i}`]?.issueCount ?? 0, prData[`closed_${i}`]?.issueCount ?? 0);
-		const iss = issueStatsForMonth({ issueCount: openedRaw.issueCount ?? 0, nodes: openedNodes }, issueData[`closed_${i}`]?.issueCount ?? 0);
+		const iss = issueStatsForMonth({ issueCount: openedRaw.issueCount ?? 0, nodes: openedNodes }, issueData[`closed_${i}`]?.issueCount ?? 0, isBug);
 		const issuesOpen = Math.max(0, count(`i_open_${i}`) - count(`i_closed_${i}`));
 		const bugsOpen = Math.max(0, count(`b_open_${i}`) - count(`b_closed_${i}`));
 		const prsOpen = Math.max(0, count(`p_open_${i}`) - count(`p_closed_${i}`));
@@ -415,9 +428,14 @@ async function fetchHistoryPage(
 // ---------------------------------------------------------------------------
 
 /** Repo-month rows for the given repos + months (parallel per repo). */
-export async function fetchRepoMonthRows(gql: GraphQL, repos: Repo[], months: Month[]): Promise<RepoMonth[]> {
+export async function fetchRepoMonthRows(
+	gql: GraphQL,
+	repos: Repo[],
+	months: Month[],
+	bugLabels: string[] = []
+): Promise<RepoMonth[]> {
 	if (!months.length) return [];
-	const all = await Promise.all(repos.map((r) => fetchRepoSeries(gql, r, months)));
+	const all = await Promise.all(repos.map((r) => fetchRepoSeries(gql, r, months, bugLabels)));
 	return all.flat();
 }
 

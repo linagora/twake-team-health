@@ -6,7 +6,7 @@
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
-	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw, Building2, ShieldCheck } from '@lucide/svelte';
+	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw, Building2, ShieldCheck, Bug } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -23,6 +23,7 @@
 	let attentionAgingDays = $state(s.attentionAgingDays);
 	let fetchConcurrency = $state(s.fetchConcurrency);
 	let orgName = $state(s.orgName);
+	let bugLabels = $state(s.bugLabels.join(', '));
 	let signals = $state({ ...s.signals });
 	let repoKeys = $state<string[]>([...initialKeys]);
 	const admins = untrack(() => data).admins;
@@ -62,6 +63,7 @@
 				attentionAgingDays = sv.attentionAgingDays;
 				fetchConcurrency = sv.fetchConcurrency;
 				orgName = sv.orgName;
+				bugLabels = (sv.bugLabels ?? []).join(', ');
 				signals = { ...sv.signals };
 				repoKeys = sv.globalRepos.map(repoKey);
 				saved = true;
@@ -199,6 +201,21 @@
 					<span class="eyebrow mb-2 block">PR aging after (days)</span>
 					<input class={inputCls} type="number" name="attentionAgingDays" min="1" max="365" bind:value={attentionAgingDays} />
 				</label>
+			</div>
+		</Card.Root>
+
+		<!-- Issue classification -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<Bug class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Bug labels</h2>
+			</div>
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
+				Issue labels that count as bugs (comma-separated). Empty = auto-detect any "bug" label. Changes
+				apply to newly-fetched data; rebuilding history needs a full re-fetch.
+			</p>
+			<div class="mt-4">
+				<input class={inputCls} type="text" name="bugLabels" placeholder="bug, type: bug, kind/bug" bind:value={bugLabels} />
 			</div>
 		</Card.Root>
 

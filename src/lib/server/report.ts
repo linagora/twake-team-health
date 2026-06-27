@@ -16,6 +16,7 @@ import {
 import { assembleMetrics, type MemberRepoMonthRow, type ReviewRepoMonthRow } from './store/assemble';
 import * as store from './store';
 import { hasDb } from './db';
+import { getAppSettings } from './app-config';
 import type { Selection, MetricsResult, RepoMonth, Repo, Member } from './github/types';
 
 const rk = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`;
@@ -137,13 +138,14 @@ async function resolveRepoAndReview(
 
 	let fetchError: unknown;
 	if (stale.length) {
+		const { bugLabels } = await getAppSettings();
 		// Fetch + persist per repo so a mid-refresh failure (e.g. a rate limit) keeps
 		// the repos that already completed; the next pass retries only the rest,
 		// instead of an all-or-nothing batch that loses everything on one blip.
 		const results = await Promise.allSettled(
 			repos.map(async (repo) => {
 				const [repoRows, reviewRowsNew] = await Promise.all([
-					fetchRepoMonthRows(gql, [repo], stale),
+					fetchRepoMonthRows(gql, [repo], stale, bugLabels),
 					fetchReviewRepoMonthRows(gql, [repo], stale)
 				]);
 				await Promise.all([
