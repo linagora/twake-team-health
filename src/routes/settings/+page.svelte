@@ -6,7 +6,7 @@
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
-	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw } from '@lucide/svelte';
+	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw, Building2, ShieldCheck } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -22,8 +22,10 @@
 	let attentionStaleDays = $state(s.attentionStaleDays);
 	let attentionAgingDays = $state(s.attentionAgingDays);
 	let fetchConcurrency = $state(s.fetchConcurrency);
+	let orgName = $state(s.orgName);
 	let signals = $state({ ...s.signals });
 	let repoKeys = $state<string[]>([...initialKeys]);
+	const admins = untrack(() => data).admins;
 
 	let saving = $state(false);
 	let saved = $state(false);
@@ -59,6 +61,7 @@
 				attentionStaleDays = sv.attentionStaleDays;
 				attentionAgingDays = sv.attentionAgingDays;
 				fetchConcurrency = sv.fetchConcurrency;
+				orgName = sv.orgName;
 				signals = { ...sv.signals };
 				repoKeys = sv.globalRepos.map(repoKey);
 				saved = true;
@@ -104,6 +107,21 @@
 
 <form method="POST" action="?/save" use:enhancer>
 	<div class="mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-6 sm:px-6 lg:px-10 lg:pt-10">
+		<!-- General -->
+		<Card.Root class="gap-0 p-6 shadow-sm">
+			<div class="flex items-center gap-2.5">
+				<Building2 class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">General</h2>
+			</div>
+			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">Shown in the sidebar under the app name.</p>
+			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+				<label class="block">
+					<span class="eyebrow mb-2 block">Organization name</span>
+					<input class={inputCls} type="text" name="orgName" maxlength="60" placeholder="Engineering metrics" bind:value={orgName} />
+				</label>
+			</div>
+		</Card.Root>
+
 		<!-- Scope -->
 		<Card.Root class="gap-0 p-6 shadow-sm">
 			<div class="flex items-center gap-2.5">
@@ -244,5 +262,25 @@
 				</span>
 			{/if}
 		</form>
+	</Card.Root>
+
+	<!-- Access (read-only; admins are bootstrapped via env) -->
+	<Card.Root class="mt-5 gap-0 p-6 shadow-sm">
+		<div class="flex items-center gap-2.5">
+			<ShieldCheck class="h-4 w-4 text-[var(--color-brand)]" />
+			<h2 class="font-display text-lg leading-none">Access</h2>
+		</div>
+		<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
+			Admins (Settings + Logs). Managed via the <code class="font-mono">ADMINS</code> environment variable.
+		</p>
+		<div class="mt-4 flex flex-wrap gap-2">
+			{#if admins.length}
+				{#each admins as a (a)}
+					<span class="rounded-md bg-[var(--color-ink-100)] px-2.5 py-1 font-mono text-xs text-[var(--color-ink-800)]">{a}</span>
+				{/each}
+			{:else}
+				<span class="text-sm text-[var(--color-ink-600)]">None configured (auth-disabled dev grants admin to everyone).</span>
+			{/if}
+		</div>
 	</Card.Root>
 </div>

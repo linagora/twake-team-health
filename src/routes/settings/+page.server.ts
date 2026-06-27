@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { isAdmin } from '$lib/server/auth';
+import { isAdmin, adminList } from '$lib/server/auth';
 import { getAppSettings, setAppSettings } from '$lib/server/app-config';
 import { listRepos } from '$lib/server/discovery';
 import { warmAll } from '$lib/server/warm';
@@ -15,7 +15,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 	} catch {
 		// Discovery can be rate limited; the editor still shows the current selection.
 	}
-	return { settings: await getAppSettings(), repos };
+	return { settings: await getAppSettings(), repos, admins: adminList() };
 };
 
 const SIGNAL_KEYS = Object.keys(DEFAULT_TARGETS) as (keyof typeof DEFAULT_TARGETS)[];
@@ -46,6 +46,7 @@ export const actions: Actions = {
 				attentionStaleDays: num('attentionStaleDays'),
 				attentionAgingDays: num('attentionAgingDays'),
 				fetchConcurrency: num('fetchConcurrency'),
+				orgName: String(fd.get('orgName') ?? ''),
 				signals
 			});
 			return { saved };

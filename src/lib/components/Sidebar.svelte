@@ -7,8 +7,9 @@
 	let {
 		open = false,
 		onClose,
-		isAdmin = false
-	}: { open?: boolean; onClose?: () => void; isAdmin?: boolean } = $props();
+		isAdmin = false,
+		orgName = ''
+	}: { open?: boolean; onClose?: () => void; isAdmin?: boolean; orgName?: string } = $props();
 
 	const nav = $derived([
 		// Big-picture views first (Overview, Global), then team-scoped detail
@@ -47,7 +48,7 @@
 				<div class="font-display text-[1.25rem] leading-none tracking-tight text-[var(--color-ink-950)]">
 					team<span class="text-[var(--color-brand)]">·</span>health
 				</div>
-				<div class="eyebrow mt-1">Engineering metrics</div>
+				<div class="eyebrow mt-1 max-w-[150px] truncate">{orgName || 'Engineering metrics'}</div>
 			</div>
 		</div>
 		<button class="rounded-md p-1.5 text-[var(--color-ink-600)] hover:bg-[var(--color-ink-100)] lg:hidden" aria-label="Close menu" onclick={() => onClose?.()}>

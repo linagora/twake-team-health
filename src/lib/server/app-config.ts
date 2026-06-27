@@ -24,6 +24,8 @@ export type AppSettings = {
 	attentionAgingDays: number;
 	// Max in-flight GitHub GraphQL calls (lower = gentler on the rate limit).
 	fetchConcurrency: number;
+	// Optional organization name shown in the sidebar brand.
+	orgName: string;
 };
 
 const CONFIG_ID = 'app';
@@ -40,7 +42,8 @@ function envSettings(): AppSettings {
 		signals: DEFAULT_TARGETS,
 		attentionStaleDays: Number(env.ATTENTION_STALE_DAYS ?? 7),
 		attentionAgingDays: Number(env.ATTENTION_AGING_DAYS ?? 14),
-		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8
+		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8,
+		orgName: env.ORG_NAME ?? ''
 	};
 }
 
@@ -92,6 +95,7 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	if (ad) out.attentionAgingDays = ad;
 	const fc = Number(o.fetchConcurrency);
 	if (Number.isInteger(fc) && fc >= 1 && fc <= 32) out.fetchConcurrency = fc;
+	if (typeof o.orgName === 'string') out.orgName = o.orgName.trim().slice(0, 60);
 	return out;
 }
 

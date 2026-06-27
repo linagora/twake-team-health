@@ -30,6 +30,13 @@ export function isAdmin(user: UserRef): boolean {
 	return inAllowlist(user, env.ADMINS) || inAllowlist(user, env.ADMIN_SUBS, false);
 }
 
+/** The configured admin identifiers (emails/subs), for a read-only display.
+ * Admins are bootstrapped via env, so the list is shown but not editable in-app. */
+export function adminList(): string[] {
+	const split = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+	return [...new Set([...split(env.ADMINS), ...split(env.ADMIN_SUBS)])];
+}
+
 // Generic OIDC client pointed at the registration service (authorization code +
 // PKCE; session in an encrypted JWT cookie — no server-side session store).
 export const { handle: authHandle, signOut } = SvelteKitAuth({
