@@ -76,7 +76,7 @@
 	<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<div class="eyebrow mb-2">Compare periods</div>
-			<h3 class="font-display text-[1.6rem] leading-none tracking-tight">Before vs. after</h3>
+			<h2 class="font-display text-[1.6rem] leading-none tracking-tight">Before vs. after</h2>
 		</div>
 		<div class="flex items-center gap-2 text-sm text-[var(--color-ink-600)]">
 			Split at
@@ -116,7 +116,7 @@
 <section>
 	<div class="mb-5">
 		<div class="eyebrow mb-2">Monthly trends · last {trend.length} months</div>
-		<h3 class="font-display text-[1.6rem] leading-none tracking-tight">{heading}</h3>
+		<h2 class="font-display text-[1.6rem] leading-none tracking-tight">{heading}</h2>
 	</div>
 	<div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
 		{#each PANELS as p (p.title)}

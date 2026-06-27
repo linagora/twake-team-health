@@ -179,7 +179,7 @@
 			<div class="mb-6 flex items-baseline justify-between">
 				<div>
 					<div class="eyebrow mb-2">Most active repositories</div>
-					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h3>
+					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h2>
 				</div>
 				<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
 					View all <ArrowUpRight class="h-3 w-3" />
@@ -209,7 +209,7 @@
 			<div>
 				<div class="mb-6">
 					<div class="eyebrow mb-2">Commit leaderboard</div>
-					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's pushing the code</h3>
+					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Who's pushing the code</h2>
 				</div>
 				<Card.Root class="p-6 shadow-sm">
 					{#if topAuthors.length === 0}
@@ -236,7 +236,7 @@
 			<div>
 				<div class="mb-6">
 					<div class="eyebrow mb-2">Lines of code · merged PRs</div>
-					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's changing the most</h3>
+					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Who's changing the most</h2>
 				</div>
 				<Card.Root class="p-6 shadow-sm">
 					{#if topLines.length === 0}
@@ -271,7 +271,7 @@
 			<section class="mt-16">
 				<div class="mb-6">
 					<div class="eyebrow mb-2">Pull requests merged · per month</div>
-					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Merged PRs, month by month</h3>
+					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Merged PRs, month by month</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
 						Each bar is the number of pull requests the team merged that month — taller means more shipped.
 					</p>

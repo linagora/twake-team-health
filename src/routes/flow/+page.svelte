@@ -90,7 +90,7 @@
 		<section>
 			<div class="mb-6">
 				<div class="eyebrow mb-2">Review load</div>
-				<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Who's carrying the reviews</h3>
+				<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Who's carrying the reviews</h2>
 			</div>
 			<Card.Root class="p-6 shadow-sm">
 				{#if data.reviewerLoad.length === 0}
