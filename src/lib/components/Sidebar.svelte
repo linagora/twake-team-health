@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers, Cog } from '@lucide/svelte';
+	import { LayoutDashboard, Users, BarChart3, Globe, X, TriangleAlert, Gauge, Layers, Cog, Activity } from '@lucide/svelte';
 	import linagoraLogo from '$lib/assets/linagora-logo.svg';
 	import twakeLogo from '$lib/assets/twake-logo.svg';
 
@@ -10,13 +10,14 @@
 		// Big-picture views first (Overview, Global), then team-scoped detail
 		// (Attention, Flow, Charts), then team management, then admin settings.
 		{ href: '/', label: 'Overview', icon: LayoutDashboard, kbd: '01' },
-		{ href: '/global', label: 'Global', icon: Globe, kbd: '02' },
-		{ href: '/breakdown', label: 'Breakdown', icon: Layers, kbd: '03' },
-		{ href: '/attention', label: 'Attention', icon: TriangleAlert, kbd: '04' },
-		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '05' },
-		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '06' },
-		{ href: '/teams', label: 'Teams', icon: Users, kbd: '07' },
-		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '08' }] : [])
+		{ href: '/signals', label: 'Signals', icon: Activity, kbd: '02' },
+		{ href: '/global', label: 'Global', icon: Globe, kbd: '03' },
+		{ href: '/breakdown', label: 'Breakdown', icon: Layers, kbd: '04' },
+		{ href: '/attention', label: 'Attention', icon: TriangleAlert, kbd: '05' },
+		{ href: '/flow', label: 'Flow', icon: Gauge, kbd: '06' },
+		{ href: '/charts', label: 'Charts', icon: BarChart3, kbd: '07' },
+		{ href: '/teams', label: 'Teams', icon: Users, kbd: '08' },
+		...(isAdmin ? [{ href: '/settings', label: 'Settings', icon: Cog, kbd: '09' }] : [])
 	]);
 </script>
 
