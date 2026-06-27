@@ -68,6 +68,13 @@
 	};
 
 	let activeCategory = $state('nb_pr');
+	// Switch category and scroll back to the top. Charts render lazily when they
+	// enter the viewport, so keeping a scrolled position would leave the new
+	// category's top charts mounted above the fold and blank.
+	function selectCategory(key: string) {
+		activeCategory = key;
+		if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
+	}
 
 	// Only one category renders at a time, so compute each transform lazily — eagerly
 	// running all six (the member-heavy ones especially) is what froze navigation in.
@@ -121,7 +128,7 @@
 				<nav class="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:gap-1 lg:overflow-visible lg:px-0 lg:pb-0 lg:sticky lg:top-32">
 					{#each CATEGORIES as c (c.key)}
 						<button
-							onclick={() => (activeCategory = c.key)}
+							onclick={() => selectCategory(c.key)}
 							class="group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left transition-colors lg:w-full lg:gap-3 lg:py-2.5 {activeCategory === c.key ? 'bg-[var(--color-brand)]/10 text-[var(--color-ink-950)]' : 'border border-[var(--color-ink-200)] text-[var(--color-ink-700)] hover:bg-[var(--color-ink-100)] hover:text-[var(--color-ink-900)] lg:border-0'}"
 						>
 							<span class="h-1.5 w-1.5 shrink-0 rounded-full {activeCategory === c.key ? 'bg-[var(--color-brand)]' : 'bg-[var(--color-ink-400)]'}"></span>
