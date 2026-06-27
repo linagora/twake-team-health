@@ -44,7 +44,10 @@
 		</button>
 	</div>
 
-	<nav class="flex-1 px-3 py-5">
+	<!-- The nav is always on screen, so preload each section's JS chunk as soon as
+	     it's in the viewport; combined with the body's preload-data="hover" this
+	     makes section switches instant even on a first click without hovering. -->
+	<nav class="flex-1 px-3 py-5" data-sveltekit-preload-code="viewport">
 		<div class="eyebrow mb-3 px-4">Navigate</div>
 		<ul class="space-y-0.5">
 			{#each nav as item (item.href)}
