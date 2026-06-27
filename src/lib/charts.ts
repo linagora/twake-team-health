@@ -183,15 +183,16 @@ export type CommitsByRepoChart = { repos: string[]; data: CommitsByRepoDatum[]; 
 /** Commits per member, broken down by repository (stacked bars, one bar per repo). */
 export function commitsByRepoChart(data: MetricsResult, config: AppConfig): CommitsByRepoChart {
 	const members = activeMembers(config);
-	const loginToName = new Map(members.map((m) => [m.login, m.name]));
 	const memberLogins = new Set(members.map((m) => m.login));
 
-	const byRepo = new Map<string, Map<string, number>>(); // repo -> name -> commits
+	// Key by login, not display name: the series key becomes a `--color-<key>` CSS
+	// variable in the chart, and names contain spaces (invalid var names) which left
+	// the bars uncolored/invisible. The page maps login -> name for the legend.
+	const byRepo = new Map<string, Map<string, number>>(); // repo -> login -> commits
 	for (const c of data.commitsByAuthorRepo) {
 		if (!memberLogins.has(c.author)) continue;
-		const name = loginToName.get(c.author)!;
 		const perMember = byRepo.get(c.repo) ?? new Map<string, number>();
-		perMember.set(name, (perMember.get(name) ?? 0) + c.commits);
+		perMember.set(c.author, (perMember.get(c.author) ?? 0) + c.commits);
 		byRepo.set(c.repo, perMember);
 	}
 
@@ -202,11 +203,11 @@ export function commitsByRepoChart(data: MetricsResult, config: AppConfig): Comm
 	const datums: CommitsByRepoDatum[] = repoKeys.map((repo) => {
 		const datum = { repo: repo.split('/').pop() ?? repo } as CommitsByRepoDatum;
 		const perMember = byRepo.get(repo)!;
-		for (const m of members) datum[m.name] = perMember.get(m.name) ?? 0;
+		for (const m of members) datum[m.login] = perMember.get(m.login) ?? 0;
 		return datum;
 	});
 
-	return { repos: repoKeys, data: datums, members: members.map((m) => m.name) };
+	return { repos: repoKeys, data: datums, members: members.map((m) => m.login) };
 }
 
 function sum(m: Map<string, number>): number {

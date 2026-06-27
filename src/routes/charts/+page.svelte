@@ -20,6 +20,10 @@
 	const stats = $derived(metrics.data);
 	const team = $derived(scope.activeTeam);
 
+	// Resolve a login to its display name (commits-by-repo series are keyed by login).
+	const memberName = $derived(new Map((team?.members ?? []).map((m) => [m.login, m.name])));
+	const nameOf = (login: string) => memberName.get(login) ?? login;
+
 	// AppConfig view of the active team for the chart transforms.
 	const config = $derived<AppConfig>({
 		months: scope.months,
@@ -177,7 +181,7 @@
 					{:else if activeCategory === 'CommitsByRepo'}
 						<Card.Root class="p-7 shadow-sm">
 							{#if commitsByRepo.data.length}
-								<MetricChart data={commitsByRepo.data} x="repo" series={keySeries(commitsByRepo.members)} kind="bar" seriesLayout="stack" class="aspect-[2/1] w-full" />
+								<MetricChart data={commitsByRepo.data} x="repo" series={keySeries(commitsByRepo.members, nameOf)} kind="bar" seriesLayout="stack" class="aspect-[2/1] w-full" />
 							{:else}
 								<div class="py-10 text-center text-sm text-[var(--color-ink-600)]">No commit data.</div>
 							{/if}
