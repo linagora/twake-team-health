@@ -30,7 +30,7 @@ function stripFetchedAt<T extends { fetchedAt?: unknown }>(rows: T[]): T[] {
 }
 
 // --- repo_month ---
-export async function getRepoMonths(repos: Repo[], months: string[]): Promise<RepoMonth[]> {
+async function selectRepoMonthRows(repos: Repo[], months: string[]) {
 	if (!repos.length || !months.length) return [];
 	const want = repoSet(repos);
 	const rows = await db()
@@ -43,7 +43,24 @@ export async function getRepoMonths(repos: Repo[], months: string[]): Promise<Re
 				inArray(repoMonth.month, months)
 			)
 		);
-	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
+	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
+}
+
+export async function getRepoMonths(repos: Repo[], months: string[]): Promise<RepoMonth[]> {
+	return stripFetchedAt(await selectRepoMonthRows(repos, months));
+}
+
+/** Repo rows for a report plus the `${owner}/${repo}::${month}` → fetched_at map
+ * that drives staleness, both from a single query (avoids a separate fetched_at
+ * read on the warm path). */
+export async function getRepoMonthsWithFetchedAt(
+	repos: Repo[],
+	months: string[]
+): Promise<{ rows: RepoMonth[]; fetchedAt: Map<string, Date> }> {
+	const raw = await selectRepoMonthRows(repos, months);
+	const fetchedAt = new Map<string, Date>();
+	for (const r of raw) fetchedAt.set(`${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
+	return { rows: stripFetchedAt(raw), fetchedAt };
 }
 
 export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
@@ -58,32 +75,8 @@ export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
 	}
 }
 
-/** Map of `${owner}/${repo}::${month}` → when that row was last fetched, for the
- * requested repos+months. Drives the "is this month still fresh?" decision. */
-export async function repoMonthFetchedAt(repos: Repo[], months: string[]): Promise<Map<string, Date>> {
-	const out = new Map<string, Date>();
-	if (!repos.length || !months.length) return out;
-	const want = repoSet(repos);
-	const rows = await db()
-		.select({ owner: repoMonth.owner, repo: repoMonth.repo, month: repoMonth.month, fetchedAt: repoMonth.fetchedAt })
-		.from(repoMonth)
-		.where(
-			and(
-				inArray(repoMonth.owner, owners(repos)),
-				inArray(repoMonth.repo, repoNames(repos)),
-				inArray(repoMonth.month, months)
-			)
-		);
-	for (const r of rows) if (want.has(`${r.owner}/${r.repo}`)) out.set(`${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
-	return out;
-}
-
 // --- member_repo_month ---
-export async function getMemberRepoMonths(
-	logins: string[],
-	repos: Repo[],
-	months: string[]
-): Promise<MemberRepoMonthRow[]> {
+async function selectMemberRepoMonthRows(logins: string[], repos: Repo[], months: string[]) {
 	if (!logins.length || !repos.length || !months.length) return [];
 	const want = repoSet(repos);
 	const rows = await db()
@@ -97,7 +90,28 @@ export async function getMemberRepoMonths(
 				inArray(memberRepoMonth.month, months)
 			)
 		);
-	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
+	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
+}
+
+export async function getMemberRepoMonths(
+	logins: string[],
+	repos: Repo[],
+	months: string[]
+): Promise<MemberRepoMonthRow[]> {
+	return stripFetchedAt(await selectMemberRepoMonthRows(logins, repos, months));
+}
+
+/** Member rows for a report plus the `${login}::${owner}/${repo}::${month}` →
+ * fetched_at map that drives staleness, both from a single query. */
+export async function getMemberRepoMonthsWithFetchedAt(
+	logins: string[],
+	repos: Repo[],
+	months: string[]
+): Promise<{ rows: MemberRepoMonthRow[]; fetchedAt: Map<string, Date> }> {
+	const raw = await selectMemberRepoMonthRows(logins, repos, months);
+	const fetchedAt = new Map<string, Date>();
+	for (const r of raw) fetchedAt.set(`${r.login}::${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
+	return { rows: stripFetchedAt(raw), fetchedAt };
 }
 
 export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promise<void> {
@@ -116,37 +130,6 @@ export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promis
 				}
 			});
 	}
-}
-
-/** Map of `${login}::${owner}/${repo}::${month}` → when that row was last fetched. */
-export async function memberMonthFetchedAt(
-	logins: string[],
-	repos: Repo[],
-	months: string[]
-): Promise<Map<string, Date>> {
-	const out = new Map<string, Date>();
-	if (!logins.length || !repos.length || !months.length) return out;
-	const want = repoSet(repos);
-	const rows = await db()
-		.select({
-			login: memberRepoMonth.login,
-			owner: memberRepoMonth.owner,
-			repo: memberRepoMonth.repo,
-			month: memberRepoMonth.month,
-			fetchedAt: memberRepoMonth.fetchedAt
-		})
-		.from(memberRepoMonth)
-		.where(
-			and(
-				inArray(memberRepoMonth.login, logins),
-				inArray(memberRepoMonth.owner, owners(repos)),
-				inArray(memberRepoMonth.repo, repoNames(repos)),
-				inArray(memberRepoMonth.month, months)
-			)
-		);
-	for (const r of rows)
-		if (want.has(`${r.owner}/${r.repo}`)) out.set(`${r.login}::${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
-	return out;
 }
 
 // --- review_repo_month ---

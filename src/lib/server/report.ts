@@ -121,11 +121,16 @@ async function resolveRepoAndReview(
 	fetchError?: unknown;
 }> {
 	const keys = months.map(monthKey);
-	const fetchedAt = await store.repoMonthFetchedAt(repos, keys);
+	// One read returns the rows and the fetched_at map that drives staleness, in
+	// parallel with reviews — no separate fetched_at query.
+	let [repoRead, reviewRows] = await Promise.all([
+		store.getRepoMonthsWithFetchedAt(repos, keys),
+		store.getReviewRepoMonths(repos, keys)
+	]);
 	const stale = monthsToFetch(
 		months,
 		(m) => repos.map((r) => `${rk(r)}::${monthKey(m)}`),
-		fetchedAt,
+		repoRead.fetchedAt,
 		currentKey,
 		nowMs
 	);
@@ -133,24 +138,25 @@ async function resolveRepoAndReview(
 	let fetchError: unknown;
 	if (stale.length) {
 		try {
-			const [repoRows, reviewRows] = await Promise.all([
+			const [repoRows, reviewRowsNew] = await Promise.all([
 				fetchRepoMonthRows(gql, repos, stale),
 				fetchReviewRepoMonthRows(gql, repos, stale)
 			]);
-			await Promise.all([store.upsertRepoMonths(repoRows), store.upsertReviewRepoMonths(reviewRows)]);
+			await Promise.all([store.upsertRepoMonths(repoRows), store.upsertReviewRepoMonths(reviewRowsNew)]);
 		} catch (e) {
 			// Degrade gracefully: a failed refresh (e.g. rate limit) shouldn't sink the
 			// whole report when the store already holds usable (if slightly stale) data.
 			fetchError = e;
 			console.warn(`[report] repo refresh failed, serving stored data: ${(e as Error).message}`);
 		}
+		// Re-read only after a refresh; the warm path uses the rows already read.
+		[repoRead, reviewRows] = await Promise.all([
+			store.getRepoMonthsWithFetchedAt(repos, keys),
+			store.getReviewRepoMonths(repos, keys)
+		]);
 	}
 
-	const [repoRows, reviewRows] = await Promise.all([
-		store.getRepoMonths(repos, keys),
-		store.getReviewRepoMonths(repos, keys)
-	]);
-	return { repoRows, reviewRows, fetched: stale.length, fetchError };
+	return { repoRows: repoRead.rows, reviewRows, fetched: stale.length, fetchError };
 }
 
 // member_repo_month: same staleness rule, per (member, repo, month). Zeros are
@@ -166,7 +172,7 @@ async function resolveMembers(
 	if (!members.length) return { rows: [], fetched: 0 };
 	const keys = months.map(monthKey);
 	const logins = members.map((m) => m.login);
-	const fetchedAt = await store.memberMonthFetchedAt(logins, repos, keys);
+	let { rows, fetchedAt } = await store.getMemberRepoMonthsWithFetchedAt(logins, repos, keys);
 	const stale = monthsToFetch(
 		months,
 		(m) => members.flatMap((mem) => repos.map((r) => `${mem.login}::${rk(r)}::${monthKey(m)}`)),
@@ -183,9 +189,10 @@ async function resolveMembers(
 			// Member stats are non-essential; never let a failed refresh sink the report.
 			console.warn(`[report] member refresh failed, serving stored data: ${(e as Error).message}`);
 		}
+		// Re-read only after a refresh; the warm path uses the rows already read.
+		rows = (await store.getMemberRepoMonthsWithFetchedAt(logins, repos, keys)).rows;
 	}
 
-	const rows = await store.getMemberRepoMonths(logins, repos, keys);
 	return { rows, fetched: stale.length };
 }
 
