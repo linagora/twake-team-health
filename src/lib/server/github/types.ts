@@ -119,7 +119,8 @@ export type ReviewerLoad = { reviewer: string; prs: number };
 export type BotActivity = {
 	login: string;
 	reviews: number; // APPROVED + CHANGES_REQUESTED submissions
-	comments: number; // COMMENTED submissions
+	comments: number; // inline review comments left
+	prs: number; // distinct PRs the bot reviewed (for comments-per-PR)
 };
 
 export type FlowResult = {

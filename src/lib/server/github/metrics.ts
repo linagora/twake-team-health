@@ -647,7 +647,7 @@ export async function fetchPrFlow(
       f${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 100) {
         nodes { ... on PullRequest {
           createdAt mergedAt
-          reviews(first: 100) { nodes { submittedAt state author { login __typename } } }
+          reviews(first: 100) { nodes { submittedAt state author { login __typename } comments { totalCount } } }
         } }
       }`
 			);
@@ -659,14 +659,19 @@ export async function fetchPrFlow(
 						(r: any) => r?.submittedAt && r.author?.login
 					);
 					// Bot reviewers (CodeRabbit, CodeScene, Copilot, ...) are excluded from
-					// human latency stats but tallied here for the Bots page.
+					// human latency stats but tallied here for the Bots page. `comments`
+					// is the inline review-comment volume; `prs` counts each PR once per
+					// bot so the page can show comments-per-PR.
+					const botsOnPr = new Set<string>();
 					for (const r of submitted) {
 						if (r.author.__typename !== 'Bot') continue;
-						const b = botAcc.get(r.author.login) ?? { login: r.author.login, reviews: 0, comments: 0 };
-						if (r.state === 'COMMENTED') b.comments += 1;
-						else if (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED') b.reviews += 1;
+						const b = botAcc.get(r.author.login) ?? { login: r.author.login, reviews: 0, comments: 0, prs: 0 };
+						if (r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED') b.reviews += 1;
+						b.comments += r.comments?.totalCount ?? 0;
 						botAcc.set(r.author.login, b);
+						botsOnPr.add(r.author.login);
 					}
+					for (const login of botsOnPr) botAcc.get(login)!.prs += 1;
 					// Human reviews only: bots review instantly and would skew latency.
 					const reviewNodes: any[] = submitted.filter((r: any) => r.author?.__typename !== 'Bot');
 					const times = reviewNodes.map((r) => r.submittedAt).sort();
