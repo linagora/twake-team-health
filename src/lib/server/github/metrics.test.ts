@@ -3,7 +3,8 @@ import {
 	prStatsForMonth,
 	issueStatsForMonth,
 	reviewCountsFromNodes,
-	commitShasForMember
+	commitShasForMember,
+	pickCommitMember
 } from './metrics';
 import { median, std, isBugLabel } from './stats';
 import { lastNMonths, monthKey, monthEnd } from './months';
@@ -18,6 +19,18 @@ describe('stats helpers', () => {
 		expect(std([5])).toBe(0);
 		expect(std([2, 4])).toBe(1.41);
 	});
+	it('pickCommitMember attributes one member: login wins, email is fallback', () => {
+		const byLogin = new Map([['alice', 'alice']]);
+		const byEmail = new Map([['bob@x.com', 'bob']]);
+		// login matches alice AND email maps to bob -> login wins, counted once
+		expect(pickCommitMember({ user: { login: 'Alice' }, email: 'bob@x.com' }, byLogin, byEmail)).toBe('alice');
+		// no login match -> email fallback
+		expect(pickCommitMember({ user: null, email: 'BOB@x.com' }, byLogin, byEmail)).toBe('bob');
+		// neither matches
+		expect(pickCommitMember({ user: { login: 'ghost' }, email: 'z@z.com' }, byLogin, byEmail)).toBeNull();
+		expect(pickCommitMember(null, byLogin, byEmail)).toBeNull();
+	});
+
 	it('isBugLabel matches whole-word bug labels, not substrings', () => {
 		expect(isBugLabel(['Bug', 'Critical'])).toBe(true);
 		expect(isBugLabel(['bugs'])).toBe(true);

@@ -129,6 +129,20 @@ function commitMatches(author: CommitNode['author'] | null, member: Member): boo
 	return false;
 }
 
+/** Attribute a commit to exactly one member: a linked GitHub login wins, then a
+ * (non-shared) author email, else nobody. One member per commit avoids the
+ * double-count where login and email point at different people. */
+export function pickCommitMember(
+	author: CommitNode['author'] | null,
+	byLogin: Map<string, string>,
+	byEmail: Map<string, string>
+): string | null {
+	if (!author) return null;
+	const viaLogin = author.user && byLogin.get(author.user.login.toLowerCase());
+	if (viaLogin) return viaLogin;
+	return (author.email && byEmail.get(author.email.toLowerCase())) || null;
+}
+
 /** Unique commit SHAs by a member in one repo, from PR commits + default-branch
  * history, within [start,end]. Mirrors get_commits_by_author (deduped per repo). */
 export function commitShasForMember(
@@ -328,13 +342,38 @@ async function fetchCommitData(gql: GraphQL, repos: Repo[], m: Month): Promise<R
       nodes { ... on PullRequest { commits(first: 100) { nodes { commit { oid committedDate author { email user { login } } } } } } }
     }`,
 		`main${i}: repository(owner: "${owner}", name: "${repo}") {
-      defaultBranchRef { target { ... on Commit { history(since: "${s}T00:00:00Z", until: "${e}T23:59:59Z") {
+      defaultBranchRef { target { ... on Commit { history(first: 100, since: "${s}T00:00:00Z", until: "${e}T23:59:59.999Z") {
         nodes { oid committedDate author { email user { login } } }
+        pageInfo { hasNextPage endCursor }
       } } } }
     }`
 	]);
 	// Each block is a heavy nested query; keep chunks small.
 	return runChunkedAliases(gql, blocks, 2);
+}
+
+type HistoryPage = { nodes: CommitNode[]; cursor: string | null };
+
+/** One page of default-branch history after a cursor (used to drain repos whose
+ * month has more than 100 default-branch commits, which the batched query caps). */
+async function fetchHistoryPage(
+	gql: GraphQL,
+	owner: string,
+	repo: string,
+	s: string,
+	e: string,
+	after: string
+): Promise<HistoryPage> {
+	const data = await gql(`{
+    repository(owner: "${owner}", name: "${repo}") {
+      defaultBranchRef { target { ... on Commit { history(first: 100, after: "${after}", since: "${s}T00:00:00Z", until: "${e}T23:59:59.999Z") {
+        nodes { oid committedDate author { email user { login } } }
+        pageInfo { hasNextPage endCursor }
+      } } } }
+    }
+  }`);
+	const h = (data.repository as any)?.defaultBranchRef?.target?.history;
+	return { nodes: h?.nodes ?? [], cursor: h?.pageInfo?.hasNextPage ? h.pageInfo.endCursor : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -371,16 +410,20 @@ export async function fetchMemberRepoMonthRows(
 	// Member lookup maps (built once) so commit attribution is a single O(commits)
 	// pass per repo/month instead of O(members x commits) re-scans.
 	const byLogin = new Map(members.map((mm) => [mm.login.toLowerCase(), mm.login]));
-	const byEmail = new Map(members.filter((mm) => mm.email).map((mm) => [mm.email!.toLowerCase(), mm.login]));
-	const matchedMembers = (author: CommitNode['author']): string[] => {
-		if (!author) return [];
-		const out = new Set<string>();
-		const viaLogin = author.user && byLogin.get(author.user.login.toLowerCase());
-		if (viaLogin) out.add(viaLogin);
-		const viaEmail = author.email && byEmail.get(author.email.toLowerCase());
-		if (viaEmail) out.add(viaEmail);
-		return [...out];
-	};
+	// Email is the fallback when a commit has no linked GitHub user. Drop any email
+	// claimed by more than one member (shared/misconfigured address), otherwise it
+	// would mis-attribute every commit authored under it to one arbitrary member.
+	const emailOwners = new Map<string, Set<string>>();
+	for (const mm of members) {
+		if (!mm.email) continue;
+		const k = mm.email.toLowerCase();
+		(emailOwners.get(k) ?? emailOwners.set(k, new Set()).get(k)!).add(mm.login);
+	}
+	const byEmail = new Map(
+		[...emailOwners].filter(([, owners]) => owners.size === 1).map(([k, owners]) => [k, [...owners][0]])
+	);
+	const matchedMember = (author: CommitNode['author']): string | null =>
+		pickCommitMember(author, byLogin, byEmail);
 
 	// Commits: fetch every month in parallel (bounded by the GraphQL semaphore),
 	// then attribute each unique SHA to the matching member(s) in one pass.
@@ -390,25 +433,40 @@ export async function fetchMemberRepoMonthRows(
 			const startMs = monthStartMs(m);
 			const endMs = monthEndMs(m);
 			const commitData = await fetchCommitData(gql, repos, m);
-			repos.forEach(({ owner, repo }, i) => {
-				const prCommits: CommitNode[] = (commitData[`pr${i}`]?.nodes ?? []).flatMap(
-					(pr: any) => pr.commits.nodes.map((c: any) => c.commit)
-				);
-				const mainCommits: CommitNode[] = commitData[`main${i}`]?.defaultBranchRef?.target?.history?.nodes ?? [];
-				const shas = new Map<string, Set<string>>(); // member login -> unique SHAs
-				const add = (login: string, oid: string) => {
-					let s = shas.get(login);
-					if (!s) shas.set(login, (s = new Set()));
-					s.add(oid);
-				};
-				for (const c of prCommits) {
-					const t = Date.parse(c.committedDate);
-					if (t < startMs || t > endMs) continue;
-					for (const login of matchedMembers(c.author)) add(login, c.oid);
-				}
-				for (const c of mainCommits) for (const login of matchedMembers(c.author)) add(login, c.oid);
-				for (const [login, set] of shas) row(login, owner, repo, month).commits += set.size;
-			});
+			await Promise.all(
+				repos.map(async ({ owner, repo }, i) => {
+					const prCommits: CommitNode[] = (commitData[`pr${i}`]?.nodes ?? []).flatMap(
+						(pr: any) => pr.commits.nodes.map((c: any) => c.commit)
+					);
+					const history = commitData[`main${i}`]?.defaultBranchRef?.target?.history;
+					const mainCommits: CommitNode[] = [...(history?.nodes ?? [])];
+					// Drain repos with >100 default-branch commits this month (the batched
+					// query only returns the first page) so commit counts aren't truncated.
+					let cursor: string | null = history?.pageInfo?.hasNextPage ? history.pageInfo.endCursor : null;
+					while (cursor) {
+						const page = await fetchHistoryPage(gql, owner, repo, monthStart(m), monthEnd(m), cursor);
+						mainCommits.push(...page.nodes);
+						cursor = page.cursor;
+					}
+					const shas = new Map<string, Set<string>>(); // member login -> unique SHAs
+					const add = (login: string, oid: string) => {
+						let s = shas.get(login);
+						if (!s) shas.set(login, (s = new Set()));
+						s.add(oid);
+					};
+					for (const c of prCommits) {
+						const t = Date.parse(c.committedDate);
+						if (t < startMs || t > endMs) continue;
+						const login = matchedMember(c.author);
+						if (login) add(login, c.oid);
+					}
+					for (const c of mainCommits) {
+						const login = matchedMember(c.author);
+						if (login) add(login, c.oid);
+					}
+					for (const [login, set] of shas) row(login, owner, repo, month).commits += set.size;
+				})
+			);
 		})
 	);
 
