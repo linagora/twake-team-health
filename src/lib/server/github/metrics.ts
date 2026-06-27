@@ -181,13 +181,49 @@ async function runChunkedAliases(
 	return merged;
 }
 
+// Node selections shared by the alias block and the pagination drainer so both
+// request identical fields.
+const PR_NODE_FIELDS = `... on PullRequest { additions deletions merged createdAt closedAt comments { totalCount } reviews { totalCount } }`;
+const ISSUE_NODE_FIELDS = `... on Issue { createdAt closedAt labels(first: 10) { nodes { name } } }`;
+const MERGED_PR_NODE_FIELDS = `... on PullRequest { author { login } additions deletions }`;
+const createdPrQuery = (owner: string, repo: string, m: Month) =>
+	`repo:${owner}/${repo} type:pr created:${monthStart(m)}..${monthEnd(m)} sort:created-asc`;
+const openedIssueQuery = (owner: string, repo: string, m: Month) =>
+	`repo:${owner}/${repo} type:issue created:${monthStart(m)}..${monthEnd(m)} sort:created-asc`;
+
+/** Collect every node of a search, draining past the first 100 (GitHub Search
+ * caps the total result set at 1000). `first` is the already-fetched first page. */
+async function drainSearchNodes(
+	gql: GraphQL,
+	query: string,
+	fields: string,
+	first: { nodes?: any[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string } }
+): Promise<any[]> {
+	const nodes = [...(first.nodes ?? [])];
+	let cursor = first.pageInfo?.hasNextPage ? first.pageInfo.endCursor : null;
+	let guard = 0;
+	while (cursor && guard++ < 12) {
+		const data: any = await gql(
+			`{ search(query: ${JSON.stringify(query)}, type: ISSUE, first: 100, after: "${cursor}") {
+        nodes { ${fields} } pageInfo { hasNextPage endCursor }
+      } }`
+		);
+		const sr = data.search;
+		if (!sr) break;
+		nodes.push(...(sr.nodes ?? []));
+		cursor = sr.pageInfo?.hasNextPage ? sr.pageInfo.endCursor : null;
+	}
+	return nodes;
+}
+
 function prAliasBlock(owner: string, repo: string, m: Month, i: number): string {
 	const s = monthStart(m);
 	const e = monthEnd(m);
 	return `
-    created_${i}: search(query: "repo:${owner}/${repo} type:pr created:${s}..${e} sort:created-asc", type: ISSUE, first: 100) {
+    created_${i}: search(query: "${createdPrQuery(owner, repo, m)}", type: ISSUE, first: 100) {
       issueCount
-      nodes { ... on PullRequest { additions deletions merged createdAt closedAt comments { totalCount } reviews { totalCount } } }
+      nodes { ${PR_NODE_FIELDS} }
+      pageInfo { hasNextPage endCursor }
     }
     merged_${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 1) { issueCount }
     closed_${i}: search(query: "repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}", type: ISSUE, first: 1) { issueCount }`;
@@ -197,9 +233,10 @@ function issueAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 	const s = monthStart(m);
 	const e = monthEnd(m);
 	return `
-    opened_${i}: search(query: "repo:${owner}/${repo} type:issue created:${s}..${e} sort:created-asc", type: ISSUE, first: 100) {
+    opened_${i}: search(query: "${openedIssueQuery(owner, repo, m)}", type: ISSUE, first: 100) {
       issueCount
-      nodes { ... on Issue { createdAt closedAt labels(first: 10) { nodes { name } } } }
+      nodes { ${ISSUE_NODE_FIELDS} }
+      pageInfo { hasNextPage endCursor }
     }
     closed_${i}: search(query: "repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}", type: ISSUE, first: 1) { issueCount }`;
 }
@@ -242,10 +279,21 @@ async function fetchRepoSeries(gql: GraphQL, { owner, repo }: Repo, months: Mont
 	// inaccessible repo nulls individual aliases); default missing aliases to empty
 	// so one bad field doesn't 500 the whole report.
 	const emptySearch = { issueCount: 0, nodes: [] };
-	return months.map((m, i) => {
+	return Promise.all(
+		months.map(async (m, i) => {
 		const count = (alias: string) => stockData[alias]?.issueCount ?? 0;
-		const pr = prStatsForMonth(prData[`created_${i}`] ?? emptySearch, prData[`merged_${i}`]?.issueCount ?? 0, prData[`closed_${i}`]?.issueCount ?? 0);
-		const iss = issueStatsForMonth(issueData[`opened_${i}`] ?? emptySearch, issueData[`closed_${i}`]?.issueCount ?? 0);
+		// Drain past 100 nodes for high-volume months so sums/medians/bug counts
+		// reflect every PR/issue, not just the first page.
+		const createdRaw = prData[`created_${i}`] ?? emptySearch;
+		const createdNodes = createdRaw.pageInfo?.hasNextPage
+			? await drainSearchNodes(gql, createdPrQuery(owner, repo, m), PR_NODE_FIELDS, createdRaw)
+			: (createdRaw.nodes ?? []);
+		const openedRaw = issueData[`opened_${i}`] ?? emptySearch;
+		const openedNodes = openedRaw.pageInfo?.hasNextPage
+			? await drainSearchNodes(gql, openedIssueQuery(owner, repo, m), ISSUE_NODE_FIELDS, openedRaw)
+			: (openedRaw.nodes ?? []);
+		const pr = prStatsForMonth({ issueCount: createdRaw.issueCount ?? 0, nodes: createdNodes }, prData[`merged_${i}`]?.issueCount ?? 0, prData[`closed_${i}`]?.issueCount ?? 0);
+		const iss = issueStatsForMonth({ issueCount: openedRaw.issueCount ?? 0, nodes: openedNodes }, issueData[`closed_${i}`]?.issueCount ?? 0);
 		const issuesOpen = Math.max(0, count(`i_open_${i}`) - count(`i_closed_${i}`));
 		const bugsOpen = Math.max(0, count(`b_open_${i}`) - count(`b_closed_${i}`));
 		const prsOpen = Math.max(0, count(`p_open_${i}`) - count(`p_closed_${i}`));
@@ -266,7 +314,8 @@ async function fetchRepoSeries(gql: GraphQL, { owner, repo }: Repo, months: Mont
 			resolutionStd: iss.resolutionStd,
 			resolutionRate: iss.resolutionRate
 		};
-	});
+		})
+	);
 }
 
 async function fetchReleases(gql: GraphQL, owner: string, repo: string, months: Month[]): Promise<number[]> {
@@ -473,25 +522,32 @@ export async function fetchMemberRepoMonthRows(
 	// Merged PRs by author, per repo, all repos in parallel.
 	const mergedWork = Promise.all(
 		repos.map(async ({ owner, repo }) => {
-			const blocks = months.map((m, i) => {
-				const s = monthStart(m);
-				const e = monthEnd(m);
-				return `m_${i}: search(query: "repo:${owner}/${repo} type:pr is:merged merged:${s}..${e}", type: ISSUE, first: 100) {
-        nodes { ... on PullRequest { author { login } additions deletions } }
-      }`;
-			});
+			const mergedQuery = (m: Month) =>
+				`repo:${owner}/${repo} type:pr is:merged merged:${monthStart(m)}..${monthEnd(m)}`;
+			const blocks = months.map(
+				(m, i) => `m_${i}: search(query: "${mergedQuery(m)}", type: ISSUE, first: 100) {
+        nodes { ${MERGED_PR_NODE_FIELDS} }
+        pageInfo { hasNextPage endCursor }
+      }`
+			);
 			const data = await runChunkedAliases(gql, blocks);
-			months.forEach((m, i) => {
-				for (const pr of data[`m_${i}`]?.nodes ?? []) {
-					const canon = pr.author?.login && byLogin.get(pr.author.login.toLowerCase());
-					if (canon) {
-						const r = row(canon, owner, repo, monthKey(m));
-						r.mergedPrs += 1;
-						r.additions += pr.additions ?? 0;
-						r.deletions += pr.deletions ?? 0;
+			await Promise.all(
+				months.map(async (m, i) => {
+					const raw = data[`m_${i}`];
+					const nodes = raw?.pageInfo?.hasNextPage
+						? await drainSearchNodes(gql, mergedQuery(m), MERGED_PR_NODE_FIELDS, raw)
+						: (raw?.nodes ?? []);
+					for (const pr of nodes) {
+						const canon = pr.author?.login && byLogin.get(pr.author.login.toLowerCase());
+						if (canon) {
+							const r = row(canon, owner, repo, monthKey(m));
+							r.mergedPrs += 1;
+							r.additions += pr.additions ?? 0;
+							r.deletions += pr.deletions ?? 0;
+						}
 					}
-				}
-			});
+				})
+			);
 		})
 	);
 
