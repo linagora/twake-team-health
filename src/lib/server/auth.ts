@@ -22,6 +22,22 @@ export function isAdmin(sub: string | undefined | null): boolean {
 		.includes(sub);
 }
 
+// Who may view the per-user event/abuse log. Listed by email OR OIDC subject in
+// LOG_VIEWERS (so the list can be human-readable emails). With auth disabled the
+// dev user can view; in prod with LOG_VIEWERS unset, nobody can (fail closed).
+export function canViewLogs(user: { sub?: string | null; email?: string | null } | null | undefined): boolean {
+	if (AUTH_DISABLED) return true;
+	if (!user) return false;
+	const allow = (env.LOG_VIEWERS ?? '')
+		.split(',')
+		.map((s) => s.trim().toLowerCase())
+		.filter(Boolean);
+	if (!allow.length) return false;
+	const sub = user.sub?.toLowerCase();
+	const email = user.email?.toLowerCase();
+	return (!!sub && allow.includes(sub)) || (!!email && allow.includes(email));
+}
+
 // Generic OIDC client pointed at the registration service (authorization code +
 // PKCE; session in an encrypted JWT cookie — no server-side session store).
 export const { handle: authHandle, signOut } = SvelteKitAuth({

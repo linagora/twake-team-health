@@ -34,6 +34,7 @@
 		if (p.startsWith('/breakdown')) return 'Breakdown';
 		if (p.startsWith('/teams')) return 'Teams';
 		if (p.startsWith('/bots')) return 'Bots';
+		if (p.startsWith('/logs')) return 'Logs';
 		if (p.startsWith('/settings')) return 'Settings';
 		if (p.startsWith('/charts')) return 'Charts';
 		if (p.startsWith('/auth')) return 'Sign in';
@@ -91,7 +92,7 @@
 		></button>
 	{/if}
 
-	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} />
+	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} canViewLogs={data.canViewLogs} />
 
 	<main class="flex-1 min-w-0">
 		<ScopeBar
