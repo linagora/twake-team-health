@@ -49,8 +49,19 @@
 			})
 		});
 		saving = false;
-		if (res.ok) saved = true;
-		else err = `${res.status}: ${(await res.text()).slice(0, 200)}`;
+		if (res.ok) {
+			// Reflect the normalized values the server actually stored (windows are
+			// clamped, repos allowlist-filtered), so the form can't show a value that
+			// wasn't saved.
+			const saved2 = await res.json();
+			globalMonths = saved2.globalMonths;
+			defaultMonths = saved2.defaultMonths;
+			defaultMemberMonths = saved2.defaultMemberMonths;
+			repoKeys = saved2.globalRepos.map(repoKey);
+			saved = true;
+		} else {
+			err = `${res.status}: ${(await res.text()).slice(0, 200)}`;
+		}
 	}
 </script>
 
