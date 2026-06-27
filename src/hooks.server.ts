@@ -14,6 +14,8 @@ const guard: Handle = async ({ event, resolve }) => {
 
 	const path = event.url.pathname;
 	if (path === '/auth' || path.startsWith('/auth/')) return resolve(event);
+	// Cron endpoints carry no session; they authorize themselves with CRON_SECRET.
+	if (path.startsWith('/api/cron/')) return resolve(event);
 
 	const session = await event.locals.auth();
 	if (!session?.user) {
