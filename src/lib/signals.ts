@@ -29,6 +29,14 @@ export type Targets = {
 	unreviewedBad: number;
 	throughputDropWarnPct: number;
 	throughputDropBadPct: number;
+	// People health: knowledge concentration (bus factor) and review-load balance.
+	busShareWarnPct: number; // a repo's top committer share that counts as concentrated
+	busMinCommits: number; // ignore repos with fewer commits than this
+	concentratedWarn: number; // how many concentrated repos before it's a problem
+	concentratedBad: number;
+	reviewShareWarnPct: number; // busiest reviewer's share of all reviews
+	reviewShareBadPct: number;
+	minReviewers: number; // need at least this many to judge balance
 };
 
 export const DEFAULT_TARGETS: Targets = {
@@ -45,7 +53,14 @@ export const DEFAULT_TARGETS: Targets = {
 	unreviewedWarn: 4,
 	unreviewedBad: 10,
 	throughputDropWarnPct: 30,
-	throughputDropBadPct: 50
+	throughputDropBadPct: 50,
+	busShareWarnPct: 70,
+	busMinCommits: 20,
+	concentratedWarn: 2,
+	concentratedBad: 4,
+	reviewShareWarnPct: 50,
+	reviewShareBadPct: 70,
+	minReviewers: 3
 };
 
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
@@ -122,6 +137,21 @@ export function computeSignals(
 						: 'Last full month is in line with recent months.'
 			});
 		}
+
+		// Review-load balance: how much of the reviewing one person carries.
+		if (flow.reviewerLoad.length >= t.minReviewers) {
+			const total = flow.reviewerLoad.reduce((sum, r) => sum + r.prs, 0);
+			const top = Math.max(...flow.reviewerLoad.map((r) => r.prs));
+			const pct = total > 0 ? Math.round((top / total) * 100) : 0;
+			out.push({
+				id: 'review-load',
+				level: highIsBad(pct, t.reviewShareWarnPct, t.reviewShareBadPct),
+				title: 'Review load balance',
+				value: `${pct}%`,
+				target: `under ${t.reviewShareWarnPct}%`,
+				detail: `Share of all PR reviews carried by the busiest of ${flow.reviewerLoad.length} reviewers.`
+			});
+		}
 	}
 
 	if (attention) {
@@ -149,6 +179,36 @@ export function computeSignals(
 			value: `${s.unreviewed}`,
 			target: `under ${t.unreviewedWarn}`,
 			detail: 'Open PRs still waiting for a first review.'
+		});
+	}
+
+	// Knowledge concentration (bus factor): repos where one person wrote most of
+	// the commits are a resignation/absence risk.
+	if (metrics && metrics.commitsByAuthorRepo.length) {
+		const byRepo = new Map<string, { total: number; top: number }>();
+		for (const c of metrics.commitsByAuthorRepo) {
+			const e = byRepo.get(c.repo) ?? { total: 0, top: 0 };
+			e.total += c.commits;
+			e.top = Math.max(e.top, c.commits); // one row per (author, repo)
+			byRepo.set(c.repo, e);
+		}
+		let concentrated = 0;
+		let worst = { repo: '', pct: 0 };
+		for (const [repo, e] of byRepo) {
+			if (e.total < t.busMinCommits) continue;
+			const pct = Math.round((e.top / e.total) * 100);
+			if (pct >= t.busShareWarnPct) concentrated += 1;
+			if (pct > worst.pct) worst = { repo, pct };
+		}
+		out.push({
+			id: 'bus-factor',
+			level: highIsBad(concentrated, t.concentratedWarn, t.concentratedBad),
+			title: 'Knowledge concentration',
+			value: `${concentrated} repos`,
+			target: `under ${t.concentratedWarn}`,
+			detail: concentrated
+				? `${concentrated} repositories where one person wrote ≥${t.busShareWarnPct}% of commits (worst: ${worst.repo} at ${worst.pct}%).`
+				: 'No single-maintainer repositories detected.'
 		});
 	}
 

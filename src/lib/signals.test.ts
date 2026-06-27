@@ -1,6 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { computeSignals, DEFAULT_TARGETS } from './signals';
-import type { FlowResult, AttentionResult, FlowStats } from './server/github/types';
+import type {
+	FlowResult,
+	AttentionResult,
+	FlowStats,
+	MetricsResult,
+	AuthorRepoCommits
+} from './server/github/types';
+
+const metricsWith = (commitsByAuthorRepo: AuthorRepoCommits[]): MetricsResult => ({
+	repos: [],
+	authors: [],
+	mergedByAuthor: [],
+	reviewActivity: [],
+	issuesByMonth: [],
+	commitsByAuthorRepo,
+	linesByAuthor: [],
+	generatedAt: 0
+});
 
 const stats = (o: Partial<FlowStats>): FlowStats => ({
 	count: 10,
@@ -66,6 +83,43 @@ describe('computeSignals', () => {
 		expect(find(sig, 'aging-prs')?.level).toBe('bad');
 		expect(find(sig, 'stale-prs')?.level).toBe('ok');
 		expect(find(sig, 'unreviewed-prs')?.level).toBe('warn');
+	});
+
+	it('flags review-load imbalance when one reviewer dominates', () => {
+		const flow = flowWith({});
+		flow.reviewerLoad = [
+			{ reviewer: 'a', prs: 80 },
+			{ reviewer: 'b', prs: 10 },
+			{ reviewer: 'c', prs: 10 }
+		];
+		expect(find(computeSignals(null, flow, null), 'review-load')?.level).toBe('bad');
+	});
+
+	it('does not judge review balance with too few reviewers', () => {
+		const flow = flowWith({});
+		flow.reviewerLoad = [{ reviewer: 'a', prs: 50 }];
+		expect(find(computeSignals(null, flow, null), 'review-load')).toBeUndefined();
+	});
+
+	it('flags knowledge concentration but ignores low-commit repos', () => {
+		const m = metricsWith([
+			{ author: 'solo', repo: 'o/a', commits: 95 }, // 100% of 95 -> concentrated
+			{ author: 'x', repo: 'o/a', commits: 0 },
+			{ author: 'p', repo: 'o/b', commits: 3 }, // below busMinCommits -> ignored
+			{ author: 'q', repo: 'o/b', commits: 2 }
+		]);
+		const sig = find(computeSignals(m, null, null), 'bus-factor');
+		expect(sig?.value).toBe('1 repos');
+		expect(sig?.detail).toContain('o/a');
+	});
+
+	it('passes when commits are well spread', () => {
+		const m = metricsWith([
+			{ author: 'a', repo: 'o/a', commits: 30 },
+			{ author: 'b', repo: 'o/a', commits: 30 },
+			{ author: 'c', repo: 'o/a', commits: 30 }
+		]);
+		expect(find(computeSignals(m, null, null), 'bus-factor')?.level).toBe('ok');
 	});
 
 	it('orders most severe first', () => {
