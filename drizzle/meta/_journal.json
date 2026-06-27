@@ -43,6 +43,13 @@
       "when": 1782510526679,
       "tag": "0005_fixed_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782590985073,
+      "tag": "0006_nifty_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

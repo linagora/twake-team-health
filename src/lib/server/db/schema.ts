@@ -6,6 +6,7 @@ import {
 	jsonb,
 	uuid,
 	timestamp,
+	boolean,
 	primaryKey,
 	index
 } from 'drizzle-orm/pg-core';
@@ -112,14 +113,31 @@ export const appConfig = pgTable('app_config', {
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 });
 
+// Wide per-user event log: one row per request (kind 'http'), per semantic action
+// (kind 'action'), or per flagged abuse/auth event (kind 'security'). Best-effort;
+// writing it must never break a request.
 export const auditLog = pgTable(
 	'audit_log',
 	{
 		id: uuid('id').defaultRandom().primaryKey(),
 		userSub: text('user_sub').notNull(),
-		action: text('action').notNull(),
+		userEmail: text('user_email'),
+		kind: text('kind').notNull().default('action'), // 'http' | 'action' | 'security'
+		action: text('action').notNull(), // action name, or "METHOD /path" for requests
+		method: text('method'),
+		path: text('path'),
+		status: integer('status'),
+		durationMs: integer('duration_ms'),
+		ip: text('ip'),
+		userAgent: text('user_agent'),
+		suspicious: boolean('suspicious').notNull().default(false),
 		detail: jsonb('detail').$type<Record<string, unknown>>(),
 		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull()
 	},
-	(t) => [index('audit_user_idx').on(t.userSub), index('audit_ts_idx').on(t.ts)]
+	(t) => [
+		index('audit_user_idx').on(t.userSub),
+		index('audit_ts_idx').on(t.ts),
+		index('audit_kind_idx').on(t.kind),
+		index('audit_suspicious_idx').on(t.suspicious)
+	]
 );

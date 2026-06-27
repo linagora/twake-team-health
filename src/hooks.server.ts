@@ -1,8 +1,66 @@
 import { sequence } from '@sveltejs/kit/hooks';
 import { redirect, type Handle } from '@sveltejs/kit';
 import { authHandle, AUTH_DISABLED } from '$lib/server/auth';
+import { logEvent } from '$lib/server/store/audit';
 
 const DEV_USER = { sub: 'dev', name: 'Dev User', email: 'dev@local' };
+
+// In-memory per-IP request-rate tracker to flag abusive bursts. Per-instance and
+// reset on restart, which is fine for surfacing obvious abuse in the event log.
+const RATE_WINDOW_MS = 60_000;
+const RATE_LIMIT = 300; // requests/min/IP before an event is flagged suspicious
+const ipHits = new Map<string, number[]>();
+function abusiveRate(ip: string, now: number): number {
+	const arr = (ipHits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+	arr.push(now);
+	ipHits.set(ip, arr);
+	return arr.length;
+}
+
+// Don't log framework/static noise; do log page navigations and API calls.
+function shouldLog(path: string): boolean {
+	if (path.startsWith('/_app/') || path.startsWith('/@')) return false;
+	if (path.startsWith('/auth/')) return false; // Auth.js internals
+	if (path.startsWith('/favicon') || path.startsWith('/.well-known')) return false;
+	return true;
+}
+
+// Wide-event request logger: one row per request, flagging auth failures, rate
+// limiting, and per-IP bursts as security/abuse events. Best-effort, after the
+// response so it never delays it.
+const logEvents: Handle = async ({ event, resolve }) => {
+	const start = Date.now();
+	const response = await resolve(event);
+	const path = event.url.pathname;
+	if (!shouldLog(path)) return response;
+
+	let ip: string | null = null;
+	try {
+		ip = event.getClientAddress();
+	} catch {
+		/* address unavailable in some environments */
+	}
+	const rateCount = ip ? abusiveRate(ip, Date.now()) : 0;
+	const status = response.status;
+	const rateAbuse = rateCount > RATE_LIMIT;
+	const suspicious = status === 401 || status === 403 || status === 429 || rateAbuse;
+	const user = event.locals.user;
+	void logEvent({
+		userSub: user?.sub ?? 'anonymous',
+		userEmail: user?.email ?? null,
+		kind: suspicious ? 'security' : 'http',
+		action: `${event.request.method} ${path}`,
+		method: event.request.method,
+		path,
+		status,
+		durationMs: Date.now() - start,
+		ip,
+		userAgent: event.request.headers.get('user-agent'),
+		suspicious,
+		detail: rateAbuse ? { reason: 'rate-abuse', reqsInWindow: rateCount } : undefined
+	});
+	return response;
+};
 
 // Populate locals.user and gate every route behind a session (except the Auth.js
 // endpoints). With AUTH_DISABLED, inject a synthetic user so local dev needs no SSO.
@@ -53,5 +111,5 @@ const securityHeaders: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = AUTH_DISABLED
-	? sequence(guard, securityHeaders)
-	: sequence(authHandle, guard, securityHeaders);
+	? sequence(logEvents, guard, securityHeaders)
+	: sequence(authHandle, logEvents, guard, securityHeaders);
