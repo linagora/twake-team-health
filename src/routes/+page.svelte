@@ -8,6 +8,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	let { data } = $props();
 
@@ -224,9 +225,12 @@
 						<ul class="space-y-3.5">
 							{#each topAuthors as [name, count] (name)}
 								<li>
-									<div class="flex items-baseline justify-between text-xs mb-1.5">
-										<a href="/people/{name}" class="text-[var(--color-ink-900)] hover:text-[var(--color-brand)] hover:underline">{displayName(name)}</a>
-										<span class="font-mono tabular text-[var(--color-ink-600)]">{fmtNum(count)}</span>
+									<div class="flex items-center justify-between gap-3 text-xs mb-1.5">
+										<a href="/people/{name}" class="flex min-w-0 items-center gap-2 text-[var(--color-ink-900)] hover:text-[var(--color-brand)]">
+											<Avatar login={name} name={displayName(name)} size={20} />
+											<span class="truncate hover:underline">{displayName(name)}</span>
+										</a>
+										<span class="font-mono tabular shrink-0 text-[var(--color-ink-600)]">{fmtNum(count)}</span>
 									</div>
 									<div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-ink-200)]">
 										<div class="h-full rounded-full bg-[var(--color-brand)]" style:width={`${(count / max) * 100}%`}></div>
@@ -251,8 +255,11 @@
 						<ul class="space-y-3.5">
 							{#each topLines as l (l.author)}
 								<li>
-									<div class="flex items-baseline justify-between gap-3 text-xs mb-1.5">
-										<a href="/people/{l.author}" class="truncate text-[var(--color-ink-900)] hover:text-[var(--color-brand)] hover:underline">{displayName(l.author)}</a>
+									<div class="flex items-center justify-between gap-3 text-xs mb-1.5">
+										<a href="/people/{l.author}" class="flex min-w-0 items-center gap-2 text-[var(--color-ink-900)] hover:text-[var(--color-brand)]">
+											<Avatar login={l.author} name={displayName(l.author)} size={20} />
+											<span class="truncate hover:underline">{displayName(l.author)}</span>
+										</a>
 										<span class="font-mono tabular shrink-0">
 											<span class="text-[var(--color-positive)]">+{fmtNum(l.additions)}</span>
 											<span class="text-[var(--color-negative)]">−{fmtNum(l.deletions)}</span>

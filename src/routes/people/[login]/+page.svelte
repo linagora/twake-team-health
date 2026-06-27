@@ -6,6 +6,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { fmtNum } from '$lib/utils';
 	import { Loader2, ArrowLeft, AlertCircle } from '@lucide/svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	const login = $derived(page.params.login ?? '');
 	const lc = (s: string) => s.toLowerCase();
@@ -13,15 +14,6 @@
 	const team = $derived(scope.activeTeam);
 	const member = $derived((team?.members ?? []).find((m) => lc(m.login) === lc(login)));
 	const name = $derived(member?.name ?? login);
-	const initials = $derived(
-		(name || login)
-			.split(/[\s@.-]+/)
-			.filter(Boolean)
-			.slice(0, 2)
-			.map((s) => s[0]?.toUpperCase() ?? '')
-			.join('')
-	);
-
 	const commitsByMonth = $derived(
 		(stats?.authors ?? []).filter((a) => lc(a.author) === lc(login)).sort((a, b) => a.month.localeCompare(b.month))
 	);
@@ -61,9 +53,7 @@
 		</div>
 	{:else if stats}
 		<div class="mb-10 flex items-center gap-4">
-			<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--color-brand)]/10 font-display text-lg text-[var(--color-brand)]">
-				{initials}
-			</div>
+			<Avatar {login} {name} size={56} />
 			<div>
 				<div class="font-display text-2xl leading-none text-[var(--color-ink-950)]">{name}</div>
 				<a href="https://github.com/{login}" target="_blank" rel="noopener noreferrer" class="font-mono text-xs text-[var(--color-ink-600)] hover:text-[var(--color-brand)]">@{login}</a>

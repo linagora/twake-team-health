@@ -8,6 +8,7 @@
 	import type { Member, Repo } from '$lib/server/github/types';
 	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search, Copy } from '@lucide/svelte';
 	import { untrack } from 'svelte';
+	import Avatar from '$lib/components/Avatar.svelte';
 
 	let { data } = $props();
 
@@ -200,6 +201,7 @@
 							<div class="h-64 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
 								{#each viewing.members as m (m.login)}
 									<div class="flex items-center gap-2.5 px-3 py-1.5 text-sm">
+										<Avatar login={m.login} name={m.name} size={20} />
 										<span class="text-[var(--color-ink-900)]">{m.name}</span>
 										<span class="font-mono text-[11px] text-[var(--color-ink-500)]">{m.login}</span>
 									</div>
@@ -273,6 +275,7 @@
 									{#each filteredMembers as m (m.login)}
 										<label class="flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-[var(--color-ink-50)]">
 											<input type="checkbox" checked={draft.members.has(m.login)} onchange={() => toggle('members', m.login)} class="accent-[var(--color-brand)]" />
+											<Avatar login={m.login} name={m.name} size={18} />
 											<span class="text-[var(--color-ink-900)]">{m.name}</span>
 											<span class="font-mono text-[11px] text-[var(--color-ink-500)]">{m.login}</span>
 										</label>
