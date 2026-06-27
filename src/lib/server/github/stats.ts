@@ -23,7 +23,10 @@ export function std(xs: number[]): number {
 	return round(Math.sqrt(variance), 2);
 }
 
-/** A label contains a "bug"-ish tag (case-insensitive substring), like the original. */
+// Match "bug"/"bugs" as a whole word (also "type:bug", "kind/bug"), but not
+// substrings like "debug" or "bugfix" that a plain includes('bug') over-counts.
+const BUG_LABEL_RE = /(^|[^a-z])bugs?([^a-z]|$)/i;
+/** Whether any label marks the issue as a bug. */
 export function isBugLabel(labels: string[]): boolean {
-	return labels.some((l) => l.toLowerCase().includes('bug'));
+	return labels.some((l) => BUG_LABEL_RE.test(l));
 }

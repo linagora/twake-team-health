@@ -18,9 +18,14 @@ describe('stats helpers', () => {
 		expect(std([5])).toBe(0);
 		expect(std([2, 4])).toBe(1.41);
 	});
-	it('isBugLabel matches bug-ish labels case-insensitively', () => {
+	it('isBugLabel matches whole-word bug labels, not substrings', () => {
 		expect(isBugLabel(['Bug', 'Critical'])).toBe(true);
+		expect(isBugLabel(['bugs'])).toBe(true);
+		expect(isBugLabel(['type:bug'])).toBe(true);
+		expect(isBugLabel(['kind/bug'])).toBe(true);
 		expect(isBugLabel(['enhancement'])).toBe(false);
+		expect(isBugLabel(['debug'])).toBe(false); // not a bug label
+		expect(isBugLabel(['bugfix'])).toBe(false); // a fix, not a bug report
 	});
 });
 

@@ -171,7 +171,7 @@ function prAliasBlock(owner: string, repo: string, m: Month, i: number): string 
 	const s = monthStart(m);
 	const e = monthEnd(m);
 	return `
-    created_${i}: search(query: "repo:${owner}/${repo} type:pr created:${s}..${e}", type: ISSUE, first: 100) {
+    created_${i}: search(query: "repo:${owner}/${repo} type:pr created:${s}..${e} sort:created-asc", type: ISSUE, first: 100) {
       issueCount
       nodes { ... on PullRequest { additions deletions merged createdAt closedAt comments { totalCount } reviews { totalCount } } }
     }
@@ -183,7 +183,7 @@ function issueAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 	const s = monthStart(m);
 	const e = monthEnd(m);
 	return `
-    opened_${i}: search(query: "repo:${owner}/${repo} type:issue created:${s}..${e}", type: ISSUE, first: 100) {
+    opened_${i}: search(query: "repo:${owner}/${repo} type:issue created:${s}..${e} sort:created-asc", type: ISSUE, first: 100) {
       issueCount
       nodes { ... on Issue { createdAt closedAt labels(first: 10) { nodes { name } } } }
     }
