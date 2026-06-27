@@ -6,7 +6,7 @@
 	import { discovery } from '$lib/client/discovery.svelte';
 	import { repoKey, parseRepoKey, type Team } from '$lib/client/selection';
 	import type { Member, Repo } from '$lib/server/github/types';
-	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search, Eye, Copy } from '@lucide/svelte';
+	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search, Copy } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 
 	let { data } = $props();
@@ -128,7 +128,18 @@
 			</div>
 			<div class="space-y-2">
 				{#each scope.teams as t (t.id)}
-					<Card.Root class="gap-0 p-4 shadow-sm {t.id === scope.activeTeamId ? 'ring-2 ring-[var(--color-brand)]' : ''}">
+					<Card.Root
+						class="gap-0 p-4 shadow-sm cursor-pointer transition-shadow hover:shadow-md {t.id === scope.activeTeamId ? 'ring-2 ring-[var(--color-brand)]' : ''} {viewing?.id === t.id ? 'ring-2 ring-[var(--color-ink-300)]' : ''}"
+						role="button"
+						tabindex={0}
+						onclick={() => view(t)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								view(t);
+							}
+						}}
+					>
 						<div class="flex items-start justify-between gap-2">
 							<div class="min-w-0">
 								<div class="flex items-center gap-2">
@@ -144,19 +155,14 @@
 								{#if t.id === scope.activeTeamId}
 									<span class="inline-flex items-center gap-1 rounded-md bg-[var(--color-brand)]/10 px-2 py-1 text-[11px] text-[var(--color-brand)]"><Check class="h-3 w-3" /> active</span>
 								{:else}
-									<Button size="xs" variant="outline" onclick={() => scope.setTeam(t.id)}>Use</Button>
+									<Button size="xs" variant="outline" onclick={(e) => { e.stopPropagation(); scope.setTeam(t.id); }}>Use</Button>
 								{/if}
-								{#if t.builtin}
-									<Button size="icon-xs" variant="ghost" onclick={() => view(t)} aria-label="View team">
-										<Eye class="h-3.5 w-3.5" />
-									</Button>
-								{/if}
-								<Button size="icon-xs" variant="ghost" onclick={() => startFrom(t)} aria-label="Create a team from this">
+								<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); startFrom(t); }} aria-label="Duplicate team">
 									<Copy class="h-3.5 w-3.5" />
 								</Button>
 								{#if !t.builtin}
-									<Button size="icon-xs" variant="ghost" onclick={() => startEdit(t.id)} aria-label="Edit"><Pencil class="h-3.5 w-3.5" /></Button>
-									<Button size="icon-xs" variant="ghost" onclick={() => scope.deleteTeam(t.id)} aria-label="Delete"><Trash2 class="h-3.5 w-3.5 text-[var(--color-negative)]" /></Button>
+									<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); startEdit(t.id); }} aria-label="Edit"><Pencil class="h-3.5 w-3.5" /></Button>
+									<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); scope.deleteTeam(t.id); }} aria-label="Delete"><Trash2 class="h-3.5 w-3.5 text-[var(--color-negative)]" /></Button>
 								{/if}
 							</div>
 						</div>
@@ -178,10 +184,10 @@
 					<div class="mb-6">
 						<div class="flex items-center gap-2">
 							<span class="font-display text-xl text-[var(--color-ink-950)]">{viewing.name}</span>
-							<span class="rounded bg-[var(--color-ink-100)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-ink-600)]">default</span>
+							{#if viewing.builtin}<span class="rounded bg-[var(--color-ink-100)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-ink-600)]">default</span>{/if}
 						</div>
 						<p class="mt-1.5 text-sm text-[var(--color-ink-600)]">
-							Preconfigured team, read-only. Create a copy to customize its members and repositories.
+							{#if viewing.builtin}A preconfigured team. Duplicate it to make your own editable copy.{:else}The members and repositories in this team.{/if}
 						</p>
 					</div>
 
@@ -221,9 +227,16 @@
 					</div>
 
 					<div class="mt-7 flex items-center gap-3 border-t border-[var(--color-ink-200)] pt-5">
-						<Button onclick={() => viewing && startFrom(viewing)}><Copy class="h-4 w-4" /> Create a team from this</Button>
 						{#if viewing.id !== scope.activeTeamId}
-							<Button variant="outline" onclick={() => viewing && scope.setTeam(viewing.id)}>Use this team</Button>
+							<Button onclick={() => viewing && scope.setTeam(viewing.id)}>Use this team</Button>
+						{/if}
+						<Button variant="outline" onclick={() => viewing && startFrom(viewing)}>
+							<Copy class="h-4 w-4" /> Duplicate to a new team
+						</Button>
+						{#if viewing && !viewing.builtin}
+							<Button variant="outline" onclick={() => viewing && startEdit(viewing.id)}>
+								<Pencil class="h-4 w-4" /> Edit
+							</Button>
 						{/if}
 						<Button variant="ghost" onclick={() => (viewing = null)}>Close</Button>
 					</div>
