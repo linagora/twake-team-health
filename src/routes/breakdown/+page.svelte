@@ -8,6 +8,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { globalMetrics } from '$lib/client/metrics.svelte';
 	import { scope } from '$lib/client/scope.svelte';
+	import { exportPdf } from '$lib/client/print.svelte';
 	import { repoKey, parseList } from '$lib/client/selection';
 	import { replaceSearchParams } from '$lib/client/url';
 	import { orgTrend, type OrgMonth } from '$lib/charts';
@@ -112,7 +113,7 @@
 >
 	{#snippet actions()}
 		{#if globalMetrics.data}
-			<Button variant="outline" size="lg" onclick={() => window.print()}>
+			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>
 		{/if}

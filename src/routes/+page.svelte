@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { metrics } from '$lib/client/metrics.svelte';
 	import { scope } from '$lib/client/scope.svelte';
+	import { exportPdf } from '$lib/client/print.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
@@ -130,7 +131,7 @@
 >
 	{#snippet actions()}
 		{#if stats}
-			<Button variant="outline" size="lg" onclick={() => window.print()}>
+			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>
 		{/if}

@@ -5,6 +5,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { globalMetrics } from '$lib/client/metrics.svelte';
+	import { exportPdf } from '$lib/client/print.svelte';
 	import { orgTrend, type OrgMonth } from '$lib/charts';
 	import { AlertCircle, Loader2, FileDown } from '@lucide/svelte';
 
@@ -27,7 +28,7 @@
 >
 	{#snippet actions()}
 		{#if globalMetrics.data}
-			<Button variant="outline" size="lg" onclick={() => window.print()}>
+			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>
 		{/if}

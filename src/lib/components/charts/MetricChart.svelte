@@ -5,6 +5,7 @@
 	import type { ChartConfig } from '$lib/components/ui/chart';
 	import { fmtMonth } from '$lib/utils';
 	import { isMonthKey, monthKeyOf } from '$lib/months';
+	import { printMode } from '$lib/client/print.svelte';
 
 	type Series = { key: string; label: string; color: string };
 
@@ -115,7 +116,7 @@
 		</div>
 	{/if}
 
-	{#if visible}
+	{#if visible || printMode.on}
 		<Chart.Container {config} class={className}>
 		{#if kind === 'bar'}
 			<BarChart

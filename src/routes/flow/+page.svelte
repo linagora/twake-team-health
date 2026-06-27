@@ -23,7 +23,10 @@
 	const o = $derived(data?.overall);
 
 	// Hours -> friendly duration.
-	const dur = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)}d` : `${h.toFixed(1)}h`);
+	const dur = (h: number | undefined | null) => {
+		const v = Number(h) || 0;
+		return v >= 48 ? `${(v / 24).toFixed(1)}d` : `${v.toFixed(1)}h`;
+	};
 
 	const loginToName = $derived(new Map((team?.members ?? []).map((m) => [m.login.toLowerCase(), m.name])));
 	const name = (login: string) => loginToName.get(login.toLowerCase()) ?? login;

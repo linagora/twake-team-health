@@ -5,6 +5,7 @@
 	import { metrics } from '$lib/client/metrics.svelte';
 	import { flow } from '$lib/client/flow.svelte';
 	import { scope } from '$lib/client/scope.svelte';
+	import { exportPdf } from '$lib/client/print.svelte';
 	import {
 		repoSeries,
 		commitsChart,
@@ -177,7 +178,7 @@
 <Topbar eyebrow="Charts" title="The charts." subtitle="Every metric drawn live from GitHub for {team?.name ?? 'your team'}.">
 	{#snippet actions()}
 		{#if stats}
-			<Button variant="outline" size="lg" onclick={() => window.print()}>
+			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>
 		{/if}
