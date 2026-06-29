@@ -65,7 +65,8 @@
 		{ key: 'busShareWarnPct', label: 'Knowledge concentration at (%)' },
 		{ key: 'reviewShareWarnPct', label: 'Review-load imbalance at (%)' },
 		{ key: 'weekendWarnPct', label: 'Weekend-commit burnout at (%)' },
-		{ key: 'lateNightWarnPct', label: 'Late-night-commit burnout at (%)' }
+		{ key: 'lateNightWarnPct', label: 'Late-night-commit burnout at (%)' },
+		{ key: 'workloadShareWarnPct', label: 'Workload concentration at (%)' }
 	];
 
 	const inputCls =

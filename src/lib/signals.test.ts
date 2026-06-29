@@ -11,11 +11,13 @@ import type {
 
 const metricsWith = (
 	commitsByAuthorRepo: AuthorRepoCommits[],
-	workPattern: WorkPattern[] = []
+	workPattern: WorkPattern[] = [],
+	authors: MetricsResult['authors'] = [],
+	mergedByAuthor: MetricsResult['mergedByAuthor'] = []
 ): MetricsResult => ({
 	repos: [],
-	authors: [],
-	mergedByAuthor: [],
+	authors,
+	mergedByAuthor,
 	reviewActivity: [],
 	issuesByMonth: [],
 	commitsByAuthorRepo,
@@ -174,6 +176,70 @@ describe('computeSignals', () => {
 	it('passes burnout when commit timing is well spread', () => {
 		const m = metricsWith([], [{ author: 'steady', commits: 50, weekendCommits: 3, lateNightCommits: 3 }]);
 		expect(find(computeSignals(m, null, null), 'burnout')?.level).toBe('ok');
+	});
+
+	it('flags workload concentration when one contributor dominates commits', () => {
+		const m = metricsWith(
+			[],
+			[],
+			[
+				{ author: 'lead', month: '2026-06', commits: 60 },
+				{ author: 'b', month: '2026-06', commits: 5 },
+				{ author: 'c', month: '2026-06', commits: 5 }
+			]
+		);
+		const sig = find(computeSignals(m, null, null), 'workload');
+		// lead = 60 of 70 commits -> 86% -> bad.
+		expect(sig?.level).toBe('bad');
+		expect(sig?.value).toBe('86%');
+		expect(sig?.people?.[0]?.login).toBe('lead');
+	});
+
+	it('warns (with the person named) when one contributor is in the warn band', () => {
+		const m = metricsWith(
+			[],
+			[],
+			[
+				{ author: 'a', month: '2026-06', commits: 45 },
+				{ author: 'b', month: '2026-06', commits: 30 },
+				{ author: 'c', month: '2026-06', commits: 25 }
+			]
+		);
+		const sig = find(computeSignals(m, null, null), 'workload');
+		expect(sig?.level).toBe('warn'); // 45% is in [40, 55)
+		expect(sig?.people?.[0]?.login).toBe('a');
+	});
+
+	it('does not judge workload with too few contributors', () => {
+		const m = metricsWith([], [], [{ author: 'solo', month: '2026-06', commits: 99 }]);
+		expect(find(computeSignals(m, null, null), 'workload')).toBeUndefined();
+	});
+
+	it('does not judge workload below the minimum total commits', () => {
+		const m = metricsWith(
+			[],
+			[],
+			[
+				{ author: 'a', month: '2026-06', commits: 6 },
+				{ author: 'b', month: '2026-06', commits: 5 },
+				{ author: 'c', month: '2026-06', commits: 5 }
+			]
+		);
+		// total 16 < workloadMinTotal (20) -> not enough work to judge.
+		expect(find(computeSignals(m, null, null), 'workload')).toBeUndefined();
+	});
+
+	it('passes workload when commits are well spread', () => {
+		const m = metricsWith(
+			[],
+			[],
+			[
+				{ author: 'a', month: '2026-06', commits: 20 },
+				{ author: 'b', month: '2026-06', commits: 20 },
+				{ author: 'c', month: '2026-06', commits: 20 }
+			]
+		);
+		expect(find(computeSignals(m, null, null), 'workload')?.level).toBe('ok');
 	});
 
 	it('orders most severe first', () => {

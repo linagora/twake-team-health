@@ -51,6 +51,12 @@ export type Targets = {
 	lateNightWarnPct: number;
 	lateNightBadPct: number;
 	burnoutMinCommits: number; // ignore members with fewer commits than this
+	// Workload concentration: the busiest member's share of the team's commits over
+	// the window.
+	workloadShareWarnPct: number;
+	workloadShareBadPct: number;
+	minContributors: number; // need at least this many contributors to judge balance
+	workloadMinTotal: number; // ignore teams with fewer total commits than this
 };
 
 export const DEFAULT_TARGETS: Targets = {
@@ -81,7 +87,11 @@ export const DEFAULT_TARGETS: Targets = {
 	weekendBadPct: 40,
 	lateNightWarnPct: 25,
 	lateNightBadPct: 40,
-	burnoutMinCommits: 15
+	burnoutMinCommits: 15,
+	workloadShareWarnPct: 40,
+	workloadShareBadPct: 55,
+	minContributors: 3,
+	workloadMinTotal: 20
 };
 
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
@@ -297,6 +307,32 @@ export function computeSignals(
 				: 'No outsized weekend or late-night commit patterns.',
 			...(flagged.length ? { people: flagged.map(({ login, note }) => ({ login, note })) } : {})
 		});
+	}
+
+	// Workload concentration: how much of the team's commits over the window land on
+	// one person. The volume counterpart to the burnout timing signal — one person
+	// carrying the team is an overload (and bus-factor) risk. Commits are the unit
+	// (a single, comparable measure); mixing in merged-PR counts would double-count,
+	// since a merged PR's own commits are already in this tally.
+	if (metrics && metrics.authors.length) {
+		const commits = new Map<string, number>();
+		for (const a of metrics.authors) commits.set(a.author, (commits.get(a.author) ?? 0) + a.commits);
+		const total = [...commits.values()].reduce((s, n) => s + n, 0);
+		if (commits.size >= t.minContributors && total >= t.workloadMinTotal) {
+			const [topAuthor, topCommits] = [...commits].reduce((a, b) => (b[1] > a[1] ? b : a));
+			const pct = Math.round((topCommits / total) * 100);
+			out.push({
+				id: 'workload',
+				level: highIsBad(pct, t.workloadShareWarnPct, t.workloadShareBadPct),
+				title: 'Workload concentration',
+				value: `${pct}%`,
+				target: `under ${t.workloadShareWarnPct}%`,
+				detail: `Commits are concentrated on the busiest of ${commits.size} contributors.`,
+				...(pct >= t.workloadShareWarnPct
+					? { people: [{ login: topAuthor, note: `wrote ${pct}% of the team's commits` }] }
+					: {})
+			});
+		}
 	}
 
 	return out.sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
