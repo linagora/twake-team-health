@@ -64,3 +64,7 @@ pnpm dev      # http://localhost:5173
 pnpm check    # type-check
 pnpm test     # unit tests
 ```
+
+## License
+
+[MIT](LICENSE)
