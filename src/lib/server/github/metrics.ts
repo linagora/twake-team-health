@@ -146,6 +146,21 @@ export function commitLocalTime(iso: string): { dow: number; hour: number } | nu
 	return { dow: local.getUTCDay(), hour: local.getUTCHours() };
 }
 
+/** A monotonic, Monday-aligned 7-day bucket id for a commit instant, for recovery
+ * (time-off) detection. Buckets MUST align to the work week: epoch 1970-01-01 is a
+ * Thursday, so without the shift a normal Mon-Fri week would straddle two buckets
+ * and a full week off would leave no gap (the streak would never reset). Shifting
+ * to the prior Monday makes one Mon-Sun calendar week map to exactly one bucket, so
+ * a quiet week is a missing id that breaks the consecutive run. Returns null for an
+ * unparseable timestamp so it is simply not counted as an active week. */
+export function weekIdOf(iso: string): number | null {
+	const ms = Date.parse(iso);
+	if (Number.isNaN(ms)) return null;
+	const WEEK_MS = 7 * 86_400_000;
+	const MONDAY_OFFSET_MS = 4 * 86_400_000; // 1970-01-05 (a Monday) becomes bucket 0
+	return Math.floor((ms - MONDAY_OFFSET_MS) / WEEK_MS);
+}
+
 /** Classify a commit's local timestamp into the two burnout buckets: committed on
  * a weekend (Sat/Sun), and/or in the late-night window (22:00-05:59). */
 export function classifyCommitTime(iso: string): { weekend: boolean; lateNight: boolean } {
@@ -491,7 +506,7 @@ export async function fetchMemberRepoMonthRows(
 		const k = `${login}::${owner}/${repo}::${month}`;
 		let r = acc.get(k);
 		if (!r) {
-			r = { login, owner, repo, month, commits: 0, weekendCommits: 0, lateNightCommits: 0, mergedPrs: 0, additions: 0, deletions: 0 };
+			r = { login, owner, repo, month, commits: 0, weekendCommits: 0, lateNightCommits: 0, activeWeeks: [], mergedPrs: 0, additions: 0, deletions: 0 };
 			acc.set(k, r);
 		}
 		return r;
@@ -536,14 +551,14 @@ export async function fetchMemberRepoMonthRows(
 						async (after) => fetchHistoryPage(gql, owner, repo, monthStart(m), monthEnd(m), after),
 						50
 					);
-					// member login -> unique SHA -> when (local) it was committed. Keyed by
-					// SHA so a commit seen via both a PR and the default branch counts once,
-					// and its weekend/late-night classification is computed a single time.
-					const shas = new Map<string, Map<string, { weekend: boolean; lateNight: boolean }>>();
+					// member login -> unique SHA -> when (local) it was committed + its week
+					// bucket. Keyed by SHA so a commit seen via both a PR and the default
+					// branch counts once, and its classification is computed a single time.
+					const shas = new Map<string, Map<string, { weekend: boolean; lateNight: boolean; week: number | null }>>();
 					const add = (login: string, c: CommitNode) => {
 						let s = shas.get(login);
 						if (!s) shas.set(login, (s = new Map()));
-						if (!s.has(c.oid)) s.set(c.oid, classifyCommitTime(c.committedDate));
+						if (!s.has(c.oid)) s.set(c.oid, { ...classifyCommitTime(c.committedDate), week: weekIdOf(c.committedDate) });
 					};
 					for (const c of prCommits) {
 						const t = Date.parse(c.committedDate);
@@ -558,10 +573,13 @@ export async function fetchMemberRepoMonthRows(
 					for (const [login, set] of shas) {
 						const r = row(login, owner, repo, month);
 						r.commits += set.size;
+						const weeks = new Set(r.activeWeeks);
 						for (const cls of set.values()) {
 							if (cls.weekend) r.weekendCommits += 1;
 							if (cls.lateNight) r.lateNightCommits += 1;
+							if (cls.week !== null) weeks.add(cls.week);
 						}
+						r.activeWeeks = [...weeks];
 					}
 				})
 			);

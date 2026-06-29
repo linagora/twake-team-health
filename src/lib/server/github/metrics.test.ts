@@ -5,7 +5,8 @@ import {
 	reviewCountsFromNodes,
 	pickCommitMember,
 	commitLocalTime,
-	classifyCommitTime
+	classifyCommitTime,
+	weekIdOf
 } from './metrics';
 import { median, std, isBugLabel, makeBugMatcher } from './stats';
 import { lastNMonths, monthKey, monthEnd } from './months';
@@ -196,6 +197,15 @@ describe('commitLocalTime / classifyCommitTime', () => {
 		expect(classifyCommitTime('2026-06-10T02:30:00+01:00')).toEqual({ weekend: false, lateNight: true });
 		expect(classifyCommitTime('2026-06-10T22:00:00+01:00')).toEqual({ weekend: false, lateNight: true });
 		expect(classifyCommitTime('2026-06-10T09:00:00+01:00')).toEqual({ weekend: false, lateNight: false });
+	});
+
+	it('weekIdOf gives Monday-aligned buckets: a week off is a real gap', () => {
+		// 2026-06-01 is a Monday, 2026-06-07 the Sunday that ends the same week.
+		const mon = weekIdOf('2026-06-01T09:00:00Z')!;
+		expect(weekIdOf('2026-06-07T23:00:00Z')).toBe(mon); // same Mon-Sun week -> one bucket
+		expect(weekIdOf('2026-06-08T00:00:00Z')).toBe(mon + 1); // next Monday -> next bucket
+		expect(weekIdOf('2026-05-31T23:00:00Z')).toBe(mon - 1); // prior Sunday -> prior bucket
+		expect(weekIdOf('nope')).toBeNull();
 	});
 
 	it('defaults to UTC for a Z-suffixed or zone-less timestamp and returns false buckets for garbage', () => {

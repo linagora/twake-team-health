@@ -66,7 +66,8 @@
 		{ key: 'reviewShareWarnPct', label: 'Review-load imbalance at (%)' },
 		{ key: 'weekendWarnPct', label: 'Weekend-commit burnout at (%)' },
 		{ key: 'lateNightWarnPct', label: 'Late-night-commit burnout at (%)' },
-		{ key: 'workloadShareWarnPct', label: 'Workload concentration at (%)' }
+		{ key: 'workloadShareWarnPct', label: 'Workload concentration at (%)' },
+		{ key: 'recoveryStreakWarnWeeks', label: 'No-break streak warns at (weeks)' }
 	];
 
 	const inputCls =

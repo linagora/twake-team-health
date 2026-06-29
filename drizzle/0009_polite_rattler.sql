@@ -1,0 +1,1 @@
+ALTER TABLE "member_repo_month" ADD COLUMN "active_weeks" jsonb DEFAULT '[]'::jsonb NOT NULL;

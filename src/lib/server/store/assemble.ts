@@ -8,6 +8,7 @@ export type MemberRepoMonthRow = {
 	commits: number;
 	weekendCommits: number; // commits made on a Sat/Sun in the author's local time
 	lateNightCommits: number; // commits made 22:00-05:59 in the author's local time
+	activeWeeks: number[]; // 7-day bucket ids this member committed in (see weekIdOf)
 	mergedPrs: number;
 	additions: number; // lines added by this member's merged PRs in the month
 	deletions: number;
@@ -44,8 +45,12 @@ export function assembleMetrics(rows: StoredRows, members: Member[], generatedAt
 	const mergedByMonth = new Map<string, number>();
 	const commitsByRepo = new Map<string, number>(); // `${login}::${owner}/${repo}`
 	const linesByAuthor = new Map<string, { additions: number; deletions: number }>();
-	// Work-pattern tally per author over the whole window (for burnout signals).
-	const patternByAuthor = new Map<string, { commits: number; weekendCommits: number; lateNightCommits: number }>();
+	// Work-pattern tally per author over the whole window (for burnout + recovery
+	// signals). `weeks` unions the active-week buckets across repos/months.
+	const patternByAuthor = new Map<
+		string,
+		{ commits: number; weekendCommits: number; lateNightCommits: number; weeks: Set<number> }
+	>();
 	for (const r of rows.memberRows) {
 		const login = canon(r.login);
 		if (!login) continue;
@@ -55,10 +60,11 @@ export function assembleMetrics(rows: StoredRows, members: Member[], generatedAt
 		if (r.commits) {
 			const rk = `${login}::${r.owner}/${r.repo}`;
 			commitsByRepo.set(rk, (commitsByRepo.get(rk) ?? 0) + r.commits);
-			const p = patternByAuthor.get(login) ?? { commits: 0, weekendCommits: 0, lateNightCommits: 0 };
+			const p = patternByAuthor.get(login) ?? { commits: 0, weekendCommits: 0, lateNightCommits: 0, weeks: new Set<number>() };
 			p.commits += r.commits;
 			p.weekendCommits += r.weekendCommits ?? 0;
 			p.lateNightCommits += r.lateNightCommits ?? 0;
+			for (const w of r.activeWeeks ?? []) p.weeks.add(w);
 			patternByAuthor.set(login, p);
 		}
 		if (r.additions || r.deletions) {
@@ -125,7 +131,11 @@ export function assembleMetrics(rows: StoredRows, members: Member[], generatedAt
 		issuesByMonth,
 		commitsByAuthorRepo,
 		linesByAuthor: [...linesByAuthor.entries()].map(([author, v]) => ({ author, ...v })),
-		workPattern: [...patternByAuthor.entries()].map(([author, v]) => ({ author, ...v })),
+		workPattern: [...patternByAuthor.entries()].map(([author, { weeks, ...v }]) => ({
+			author,
+			...v,
+			activeWeeks: [...weeks].sort((a, b) => a - b)
+		})),
 		generatedAt
 	};
 }

@@ -247,6 +247,7 @@ function fillMemberGrid(
 						commits: 0,
 						weekendCommits: 0,
 						lateNightCommits: 0,
+						activeWeeks: [],
 						mergedPrs: 0,
 						additions: 0,
 						deletions: 0

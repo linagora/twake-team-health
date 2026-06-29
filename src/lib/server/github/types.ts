@@ -43,7 +43,14 @@ export type AuthorRepoCommits = { author: string; repo: string; commits: number 
 export type AuthorLines = { author: string; additions: number; deletions: number };
 /** When a member commits, over the window: total vs. the weekend / late-night
  * (local-time) shares that feed burnout detection. */
-export type WorkPattern = { author: string; commits: number; weekendCommits: number; lateNightCommits: number };
+export type WorkPattern = {
+	author: string;
+	commits: number;
+	weekendCommits: number;
+	lateNightCommits: number;
+	/** 7-day bucket ids this member committed in (sorted), for recovery detection. */
+	activeWeeks: number[];
+};
 
 export type MetricsResult = {
 	repos: RepoMonth[];

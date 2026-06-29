@@ -65,6 +65,10 @@ export type Targets = {
 	workloadShareBadPct: number;
 	minContributors: number; // need at least this many contributors to judge balance
 	workloadMinTotal: number; // ignore teams with fewer total commits than this
+	// Recovery deficit: the longest run of consecutive weeks a member committed in
+	// with no quiet week (no time off) before it's worth flagging.
+	recoveryStreakWarnWeeks: number;
+	recoveryStreakBadWeeks: number;
 };
 
 export const DEFAULT_TARGETS: Targets = {
@@ -99,7 +103,9 @@ export const DEFAULT_TARGETS: Targets = {
 	workloadShareWarnPct: 40,
 	workloadShareBadPct: 55,
 	minContributors: 3,
-	workloadMinTotal: 20
+	workloadMinTotal: 20,
+	recoveryStreakWarnWeeks: 8,
+	recoveryStreakBadWeeks: 12
 };
 
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
@@ -113,6 +119,20 @@ const lowIsBad = (v: number, warn: number, bad: number): SignalLevel =>
 	v <= bad ? 'bad' : v <= warn ? 'warn' : 'ok';
 
 const dur = (h: number): string => (h >= 48 ? `${Math.round((h / 24) * 10) / 10}d` : `${Math.round(h)}h`);
+
+/** Longest run of consecutive week ids (the set is unique; sorted defensively).
+ * 1 for a single isolated active week, 0 for none. */
+const longestRun = (weeks: number[]): number => {
+	if (!weeks.length) return 0;
+	const sorted = [...weeks].sort((a, b) => a - b);
+	let best = 1;
+	let run = 1;
+	for (let i = 1; i < sorted.length; i++) {
+		run = sorted[i] === sorted[i - 1] + 1 ? run + 1 : 1;
+		if (run > best) best = run;
+	}
+	return best;
+};
 
 const median = (xs: number[]): number => {
 	if (!xs.length) return 0;
@@ -340,6 +360,29 @@ export function computeSignals(
 				? `${flagged.length === 1 ? 'Someone is' : `${flagged.length} people are`} committing heavily on weekends or late at night.`
 				: 'No outsized weekend or late-night commit patterns.',
 			...(flagged.length ? { people: flagged.map(({ login, note }) => ({ login, note })) } : {})
+		});
+
+		// Recovery deficit: members who committed week after week with no quiet week.
+		// The longest unbroken run of active weeks is the measure — a real break (a
+		// week with zero commits) resets it, which is exactly what we want to catch.
+		const noBreak: { login: string; note: string; level: SignalLevel }[] = [];
+		for (const w of metrics.workPattern) {
+			const streak = longestRun(w.activeWeeks ?? []);
+			const level = highIsBad(streak, t.recoveryStreakWarnWeeks, t.recoveryStreakBadWeeks);
+			if (level === 'ok') continue;
+			noBreak.push({ login: w.author, note: `${streak} weeks with no break`, level });
+		}
+		noBreak.sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
+		out.push({
+			id: 'recovery',
+			level: noBreak[0]?.level ?? 'ok',
+			title: 'Recovery deficit',
+			value: `${noBreak.length} ${noBreak.length === 1 ? 'person' : 'people'}`,
+			target: 'none',
+			detail: noBreak.length
+				? `${noBreak.length === 1 ? 'Someone has' : `${noBreak.length} people have`} committed week after week with no break.`
+				: 'No long unbroken commit streaks.',
+			...(noBreak.length ? { people: noBreak.map(({ login, note }) => ({ login, note })) } : {})
 		});
 	}
 

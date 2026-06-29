@@ -157,10 +157,10 @@ describe('computeSignals', () => {
 		const m = metricsWith(
 			[],
 			[
-				{ author: 'weekendwarrior', commits: 40, weekendCommits: 20, lateNightCommits: 0 }, // 50% weekend -> bad
-				{ author: 'nightowl', commits: 40, weekendCommits: 0, lateNightCommits: 12 }, // 30% late -> warn
-				{ author: 'balanced', commits: 40, weekendCommits: 2, lateNightCommits: 2 }, // 5% each -> ok
-				{ author: 'newbie', commits: 4, weekendCommits: 4, lateNightCommits: 4 } // below burnoutMinCommits -> ignored
+				{ author: 'weekendwarrior', commits: 40, weekendCommits: 20, lateNightCommits: 0, activeWeeks: [] }, // 50% weekend -> bad
+				{ author: 'nightowl', commits: 40, weekendCommits: 0, lateNightCommits: 12, activeWeeks: [] }, // 30% late -> warn
+				{ author: 'balanced', commits: 40, weekendCommits: 2, lateNightCommits: 2, activeWeeks: [] }, // 5% each -> ok
+				{ author: 'newbie', commits: 4, weekendCommits: 4, lateNightCommits: 4, activeWeeks: [] } // below burnoutMinCommits -> ignored
 			]
 		);
 		const sig = find(computeSignals(m, null, null), 'burnout');
@@ -174,8 +174,33 @@ describe('computeSignals', () => {
 	});
 
 	it('passes burnout when commit timing is well spread', () => {
-		const m = metricsWith([], [{ author: 'steady', commits: 50, weekendCommits: 3, lateNightCommits: 3 }]);
+		const m = metricsWith([], [{ author: 'steady', commits: 50, weekendCommits: 3, lateNightCommits: 3, activeWeeks: [] }]);
 		expect(find(computeSignals(m, null, null), 'burnout')?.level).toBe('ok');
+	});
+
+	it('flags a recovery deficit for a long unbroken active-week streak, reset by a quiet week', () => {
+		const m = metricsWith(
+			[],
+			[
+				// 13 consecutive weeks, no break -> bad (>= recoveryStreakBadWeeks 12).
+				{ author: 'machine', commits: 50, weekendCommits: 0, lateNightCommits: 0, activeWeeks: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112] },
+				// A break at week 205 caps the longest run at 4 -> ok.
+				{ author: 'rests', commits: 50, weekendCommits: 0, lateNightCommits: 0, activeWeeks: [200, 201, 202, 203, 205, 206] }
+			]
+		);
+		const sig = find(computeSignals(m, null, null), 'recovery');
+		expect(sig?.level).toBe('bad');
+		expect(sig?.value).toBe('1 person');
+		expect(sig?.people?.[0]?.login).toBe('machine');
+		expect(sig?.people?.[0]?.note).toContain('13 weeks');
+	});
+
+	it('passes recovery when everyone takes breaks', () => {
+		const m = metricsWith(
+			[],
+			[{ author: 'rests', commits: 50, weekendCommits: 0, lateNightCommits: 0, activeWeeks: [1, 2, 3, 6, 7, 8] }]
+		);
+		expect(find(computeSignals(m, null, null), 'recovery')?.level).toBe('ok');
 	});
 
 	it('flags workload concentration when one contributor dominates commits', () => {

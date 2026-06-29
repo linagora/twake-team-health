@@ -62,6 +62,9 @@ export const memberRepoMonth = pgTable(
 		// column existed read as "unknown / none" rather than null.
 		weekendCommits: integer('weekend_commits').notNull().default(0),
 		lateNightCommits: integer('late_night_commits').notNull().default(0),
+		// Recovery (time-off) detection: the 7-day bucket ids this member committed in
+		// during the month, unioned across the window to find unbroken active streaks.
+		activeWeeks: jsonb('active_weeks').$type<number[]>().notNull().default([]),
 		mergedPrs: integer('merged_prs').notNull(),
 		additions: integer('additions').notNull().default(0),
 		deletions: integer('deletions').notNull().default(0),

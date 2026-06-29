@@ -125,6 +125,7 @@ export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promis
 					commits: sqlExcluded('commits'),
 					weekendCommits: sqlExcluded('weekend_commits'),
 					lateNightCommits: sqlExcluded('late_night_commits'),
+					activeWeeks: sqlExcluded('active_weeks'),
 					mergedPrs: sqlExcluded('merged_prs'),
 					additions: sqlExcluded('additions'),
 					deletions: sqlExcluded('deletions'),
