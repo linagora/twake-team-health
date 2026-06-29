@@ -134,6 +134,27 @@ type CommitNode = { oid: string; committedDate: string; author: { email: string 
 
 const WEEKDAY_NUM: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
+// Constructing an Intl.DateTimeFormat is the expensive part of timezone formatting,
+// so cache one per zone: the per-commit classification runs over thousands of commits
+// and would otherwise rebuild the same formatter every time.
+const tzFormatters = new Map<string, Intl.DateTimeFormat>();
+function tzFormatter(tz: string): Intl.DateTimeFormat {
+	let f = tzFormatters.get(tz);
+	if (!f) {
+		f = new Intl.DateTimeFormat('en-US', {
+			timeZone: tz, // throws for an unknown zone (caught by the caller)
+			weekday: 'short',
+			hour12: false,
+			hour: '2-digit',
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		});
+		tzFormatters.set(tz, f);
+	}
+	return f;
+}
+
 /** Local weekday (0=Sun..6=Sat), hour (0-23), and integer local-day number for a
  * commit instant — in `tz` (IANA) when given, else from the timestamp's own offset
  * (a zone-less timestamp is pinned to UTC so the result is never server-dependent). */
@@ -144,15 +165,7 @@ function localParts(iso: string, tz?: string): { dow: number; hour: number; dayN
 	if (Number.isNaN(ms)) return null;
 	if (tz) {
 		try {
-			const parts = new Intl.DateTimeFormat('en-US', {
-				timeZone: tz,
-				weekday: 'short',
-				hour12: false,
-				hour: '2-digit',
-				year: 'numeric',
-				month: '2-digit',
-				day: '2-digit'
-			}).formatToParts(new Date(ms));
+			const parts = tzFormatter(tz).formatToParts(new Date(ms));
 			const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
 			const dow = WEEKDAY_NUM[get('weekday')];
 			const hour = Number(get('hour')) % 24; // some engines render midnight as "24"

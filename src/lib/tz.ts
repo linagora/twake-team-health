@@ -28,8 +28,5 @@ export function commonTimeZones(): string[] {
  * embedded offset otherwise. Pure; safe to call on the client and in the warm job. */
 export function withTeamTz(members: Member[], teamTz?: string): Member[] {
 	const fallback = isValidTimeZone(teamTz) ? teamTz : undefined;
-	return members.map((m) => {
-		const tz = isValidTimeZone(m.tz) ? m.tz : fallback;
-		return tz ? { ...m, tz } : { ...m, tz: undefined };
-	});
+	return members.map((m) => ({ ...m, tz: isValidTimeZone(m.tz) ? m.tz : fallback }));
 }

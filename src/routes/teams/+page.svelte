@@ -325,14 +325,18 @@
 						</div>
 						<div>
 							<label for="team-tz" class="eyebrow mb-2 block">Default timezone</label>
-							<select
+							<input
 								id="team-tz"
+								list="tz-options"
 								bind:value={draft.tz}
+								placeholder="Use each commit's own offset"
 								class="w-64 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-3 py-2 text-sm focus:border-[var(--color-brand)] focus:outline-none"
-							>
-								<option value="">Use each commit's own offset</option>
-								{#each timeZones as z (z)}<option value={z}>{z}</option>{/each}
-							</select>
+							/>
+							<!-- One shared list of zones for the team default + every per-member input,
+							     so the ~420 options exist once in the DOM rather than per control. -->
+							<datalist id="tz-options">
+								{#each timeZones as z (z)}<option value={z}></option>{/each}
+							</datalist>
 							<p class="mt-1 max-w-64 text-[11px] text-[var(--color-ink-500)]">
 								Used to read burnout timing in local time. Members can override below.
 							</p>
@@ -365,15 +369,14 @@
 												<span class="font-mono text-[11px] text-[var(--color-ink-500)]">{m.login}</span>
 											</label>
 											{#if draft.members.has(m.login)}
-												<select
-													class="max-w-32 shrink-0 rounded border border-[var(--color-ink-200)] bg-[var(--color-card)] px-1 py-0.5 text-[11px] text-[var(--color-ink-600)] focus:border-[var(--color-brand)] focus:outline-none"
+												<input
+													list="tz-options"
+													class="w-36 shrink-0 rounded border border-[var(--color-ink-200)] bg-[var(--color-card)] px-1.5 py-0.5 text-[11px] text-[var(--color-ink-600)] focus:border-[var(--color-brand)] focus:outline-none"
 													title="Timezone override for {m.login}"
+													placeholder="team default"
 													value={draft.memberTz.get(m.login) ?? ''}
 													onchange={(e) => setMemberTz(m.login, e.currentTarget.value)}
-												>
-													<option value="">team default</option>
-													{#each timeZones as z (z)}<option value={z}>{z}</option>{/each}
-												</select>
+												/>
 											{/if}
 										</div>
 									{/each}
