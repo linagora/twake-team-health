@@ -80,6 +80,8 @@ const guard: Handle = async ({ event, resolve }) => {
 
 	const path = event.url.pathname;
 	if (path === '/auth' || path.startsWith('/auth/')) return resolve(event);
+	// The sign-in page itself must be reachable without a session.
+	if (path === '/login') return resolve(event);
 	// Cron endpoints carry no session; they authorize themselves with CRON_SECRET.
 	if (path.startsWith('/api/cron/')) return resolve(event);
 
@@ -93,7 +95,7 @@ const guard: Handle = async ({ event, resolve }) => {
 				headers: { 'content-type': 'application/json' }
 			});
 		}
-		throw redirect(303, `/auth/signin?callbackUrl=${encodeURIComponent(path)}`);
+		throw redirect(303, `/login?callbackUrl=${encodeURIComponent(path)}`);
 	}
 	const u = session.user as { id?: string; name?: string | null; email?: string | null };
 	const sub = u.id ?? u.email;

@@ -7,7 +7,7 @@
  * seeing a parse error from an HTML redirect body. */
 export function redirectToSignIn(): void {
 	if (typeof window !== 'undefined') {
-		window.location.href = `/auth/signin?callbackUrl=${encodeURIComponent(location.pathname)}`;
+		window.location.href = `/login?callbackUrl=${encodeURIComponent(location.pathname)}`;
 	}
 }
 

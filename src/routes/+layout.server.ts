@@ -14,7 +14,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		global: { repos: settings.globalRepos, months: settings.globalMonths },
 		signals: settings.signals,
 		orgName: settings.orgName,
-		user: { name: locals.user.name, email: locals.user.email },
+		user: { name: locals.user?.name ?? '', email: locals.user?.email ?? '' },
 		authEnabled: !AUTH_DISABLED,
 		teamsPersisted: hasDb(),
 		isAdmin: isAdmin(locals.user)

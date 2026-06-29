@@ -42,6 +42,9 @@
 	});
 	const pageTitle = $derived(pageSection ? `${pageSection} · team·health` : 'team·health');
 
+	// The sign-in page stands alone: no sidebar, scope bar, or team/metrics loading.
+	const bare = $derived(page.url.pathname === '/login');
+
 	// Mobile nav drawer (sidebar collapses below lg).
 	let drawerOpen = $state(false);
 	// Close the drawer on navigation.
@@ -54,6 +57,7 @@
 	// then let it manage selection + metrics loading client-side. A URL query string
 	// (shared/bookmarked link) takes precedence over the per-browser preference.
 	$effect(() => {
+		if (bare) return; // sign-in page loads no team data
 		if (!scope.initialized) {
 			scope.months = data.defaults.months;
 			scope.memberMonths = data.defaults.memberMonths;
@@ -83,29 +87,33 @@
 	<meta name="twitter:image" content="{page.url.origin}/og.png" />
 </svelte:head>
 
-<div class="flex min-h-screen">
-	{#if drawerOpen}
-		<button
-			class="fixed inset-0 z-40 bg-[var(--color-ink-950)]/30 backdrop-blur-sm lg:hidden"
-			aria-label="Close menu"
-			onclick={() => (drawerOpen = false)}
-		></button>
-	{/if}
+{#if bare}
+	{@render children()}
+{:else}
+	<div class="flex min-h-screen">
+		{#if drawerOpen}
+			<button
+				class="fixed inset-0 z-40 bg-[var(--color-ink-950)]/30 backdrop-blur-sm lg:hidden"
+				aria-label="Close menu"
+				onclick={() => (drawerOpen = false)}
+			></button>
+		{/if}
 
-	<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} orgName={data.orgName} />
+		<Sidebar open={drawerOpen} onClose={() => (drawerOpen = false)} isAdmin={data.isAdmin} orgName={data.orgName} />
 
-	<main class="flex-1 min-w-0">
-		<ScopeBar
-			user={data.user}
-			authEnabled={data.authEnabled}
-			busy={loading}
-			onRefresh={active.refresh}
-			onMenu={() => (drawerOpen = true)}
-		/>
-		<LoadingBar active={loading} />
-		<!-- Dim + soften the stale view while a new report loads, so it's clearly refreshing. -->
-		<div class="transition-opacity duration-200 {loading ? 'pointer-events-none opacity-45' : ''}" aria-busy={loading}>
-			{@render children()}
-		</div>
-	</main>
-</div>
+		<main class="flex-1 min-w-0">
+			<ScopeBar
+				user={data.user}
+				authEnabled={data.authEnabled}
+				busy={loading}
+				onRefresh={active.refresh}
+				onMenu={() => (drawerOpen = true)}
+			/>
+			<LoadingBar active={loading} />
+			<!-- Dim + soften the stale view while a new report loads, so it's clearly refreshing. -->
+			<div class="transition-opacity duration-200 {loading ? 'pointer-events-none opacity-45' : ''}" aria-busy={loading}>
+				{@render children()}
+			</div>
+		</main>
+	</div>
+{/if}

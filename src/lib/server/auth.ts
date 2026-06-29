@@ -42,6 +42,8 @@ export function adminList(): string[] {
 export const { handle: authHandle, signOut } = SvelteKitAuth({
 	trustHost: true,
 	secret: env.AUTH_SECRET,
+	// Use our own themed sign-in route instead of Auth.js's generic built-in page.
+	pages: { signIn: '/login' },
 	providers: [
 		{
 			id: 'oidc',
@@ -49,12 +51,9 @@ export const { handle: authHandle, signOut } = SvelteKitAuth({
 			type: 'oidc',
 			issuer: env.OIDC_ISSUER,
 			clientId: env.OIDC_CLIENT_ID,
-			clientSecret: env.OIDC_CLIENT_SECRET,
-			// Self-host the button logo. Auth.js's built-in sign-in page defaults the
-			// provider logo to https://authjs.dev/img/providers/oidc.svg, which now
-			// 404s upstream; serve our own so the page works offline and never breaks
-			// when that asset moves again.
-			style: { logo: '/oidc.svg', bg: '#fff', text: '#24292f' }
+			clientSecret: env.OIDC_CLIENT_SECRET
+			// (No `style` block: the built-in Auth.js sign-in page is replaced by the
+			// themed /login route above, so its button styling is no longer used.)
 		}
 	],
 	callbacks: {
