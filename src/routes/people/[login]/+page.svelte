@@ -7,6 +7,7 @@
 	import { fmtNum } from '$lib/utils';
 	import { Loader2, ArrowLeft, AlertCircle } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
+	import { DEFAULT_TARGETS, type SignalLevel } from '$lib/signals';
 
 	const login = $derived(page.params.login ?? '');
 	const lc = (s: string) => s.toLowerCase();
@@ -31,6 +32,49 @@
 	const pct = (n: number) => (pattern && pattern.commits ? Math.round((n / pattern.commits) * 100) : 0);
 	const weekendPct = $derived(pct(pattern?.weekendCommits ?? 0));
 	const lateNightPct = $derived(pct(pattern?.lateNightCommits ?? 0));
+
+	// Per-person health rollup: grade this member against the same admin-tunable
+	// thresholds the team Signals page uses, so the profile shows their individual
+	// standing on burnout (timing) and workload (volume).
+	const targets = $derived(page.data.signals ?? DEFAULT_TARGETS);
+	const teamCommits = $derived((stats?.authors ?? []).reduce((s, a) => s + a.commits, 0));
+	const teamContributors = $derived(new Set((stats?.authors ?? []).map((a) => a.author)).size);
+	const workloadPct = $derived(teamCommits ? Math.round((totalCommits / teamCommits) * 100) : 0);
+	const lvl = (v: number, warn: number, bad: number): SignalLevel => (v >= bad ? 'bad' : v >= warn ? 'warn' : 'ok');
+	// Timing shares are noise on tiny commit counts, so only grade them past the same
+	// floor the team-level burnout signal uses; below it, show the number unjudged.
+	const enoughCommits = $derived((pattern?.commits ?? 0) >= targets.burnoutMinCommits);
+	const health = $derived([
+		{
+			label: 'Weekend commits',
+			value: `${weekendPct}%`,
+			level: lvl(weekendPct, targets.weekendWarnPct, targets.weekendBadPct),
+			muted: !enoughCommits,
+			note: enoughCommits ? `${fmtNum(pattern?.weekendCommits ?? 0)} on Sat/Sun, local` : 'too few commits to judge'
+		},
+		{
+			label: 'Late-night commits',
+			value: `${lateNightPct}%`,
+			level: lvl(lateNightPct, targets.lateNightWarnPct, targets.lateNightBadPct),
+			muted: !enoughCommits,
+			note: enoughCommits ? `${fmtNum(pattern?.lateNightCommits ?? 0)} after 10pm, local` : 'too few commits to judge'
+		},
+		{
+			label: 'Share of team commits',
+			value: `${workloadPct}%`,
+			level: lvl(workloadPct, targets.workloadShareWarnPct, targets.workloadShareBadPct),
+			// Don't grade a share the team Signals page would suppress: too few
+			// contributors or too little total work to read concentration into.
+			muted: teamContributors < targets.minContributors || teamCommits < targets.workloadMinTotal,
+			note: `${fmtNum(totalCommits)} of ${fmtNum(teamCommits)} team commits`
+		}
+	]);
+	// Matches the Signals page accent scheme (amber-700 for warn keeps >= 4.5:1 contrast).
+	const accent: Record<SignalLevel, string> = {
+		bad: 'var(--color-negative)',
+		warn: '#b45309',
+		ok: 'var(--color-positive)'
+	};
 
 	const hasActivity = $derived(totalCommits > 0 || merged > 0 || review.reviews > 0 || lines.additions + lines.deletions > 0);
 </script>
@@ -93,15 +137,26 @@
 					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{fmtNum(review.reviews)}</div>
 					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(review.comments)} comments</div>
 				</div>
-				<div>
-					<div class="eyebrow mb-2">Weekend commits</div>
-					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{weekendPct}%</div>
-					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(pattern?.weekendCommits ?? 0)} on Sat/Sun (local)</div>
+			</section>
+
+			<!-- Health signals: this member graded against the team's thresholds -->
+			<section class="mb-12">
+				<div class="mb-6">
+					<div class="eyebrow mb-2">Health signals</div>
+					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Burnout & workload</h3>
 				</div>
-				<div>
-					<div class="eyebrow mb-2">Late-night commits</div>
-					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{lateNightPct}%</div>
-					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(pattern?.lateNightCommits ?? 0)} after 10pm (local)</div>
+				<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+					{#each health as h (h.label)}
+						{@const color = h.muted ? 'var(--color-ink-400)' : accent[h.level]}
+						<Card.Root
+							class="gap-0 border p-5 shadow-sm"
+							style="border-left: 4px solid {color}; border-color: color-mix(in oklab, {color} 28%, var(--color-ink-200)); background: color-mix(in oklab, {color} 8%, var(--color-card))"
+						>
+							<div class="text-sm text-[var(--color-ink-700)]">{h.label}</div>
+							<div class="mt-2 font-display tabular text-3xl leading-none" style="color: {color}">{h.value}</div>
+							<div class="mt-2 font-mono text-xs text-[var(--color-ink-500)]">{h.note}</div>
+						</Card.Root>
+					{/each}
 				</div>
 			</section>
 
