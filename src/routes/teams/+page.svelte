@@ -34,7 +34,14 @@
 		}
 	});
 
-	type Draft = { id: string | null; name: string; members: Set<string>; repos: Set<string> };
+	type Draft = {
+		id: string | null;
+		name: string;
+		members: Set<string>;
+		repos: Set<string>;
+		// Subset of `repos` whose GitHub releases are excluded from the stats.
+		noReleases: Set<string>;
+	};
 	let draft = $state<Draft | null>(null);
 	// A preconfigured team shown read-only in the detail panel.
 	let viewing = $state<Team | null>(null);
@@ -42,7 +49,7 @@
 	let repoQuery = $state('');
 
 	function startNew() {
-		draft = { id: null, name: '', members: new Set(), repos: new Set() };
+		draft = { id: null, name: '', members: new Set(), repos: new Set(), noReleases: new Set() };
 		viewing = null;
 		memberQuery = '';
 		repoQuery = '';
@@ -58,7 +65,8 @@
 			id: null,
 			name: `${t.name} copy`,
 			members: new Set(t.members.map((m) => m.login)),
-			repos: new Set(t.repos.map(repoKey))
+			repos: new Set(t.repos.map(repoKey)),
+			noReleases: new Set(t.repos.filter((r) => r.noReleases).map(repoKey))
 		};
 		viewing = null;
 		memberQuery = '';
@@ -71,7 +79,8 @@
 			id: t.id,
 			name: t.name,
 			members: new Set(t.members.map((m) => m.login)),
-			repos: new Set(t.repos.map(repoKey))
+			repos: new Set(t.repos.map(repoKey)),
+			noReleases: new Set(t.repos.filter((r) => r.noReleases).map(repoKey))
 		};
 		viewing = null;
 		memberQuery = '';
@@ -92,7 +101,10 @@
 		const members: Member[] = [...draft.members].map(
 			(login) => memberByLogin.get(login) ?? { login, name: login }
 		);
-		const repos: Repo[] = [...draft.repos].map((k) => repoByKey.get(k) ?? parseRepoKey(k));
+		const repos: Repo[] = [...draft.repos].map((k) => {
+			const { owner, repo } = repoByKey.get(k) ?? parseRepoKey(k);
+			return draft!.noReleases.has(k) ? { owner, repo, noReleases: true } : { owner, repo };
+		});
 		if (!draft.name.trim() || repos.length === 0) return;
 		saving = true;
 		saveError = null;
@@ -108,23 +120,37 @@
 		}
 	}
 
+	// Cap the rendered rows so a huge org can't jank the list; high enough that every
+	// discovered repo/member across the allowed orgs shows without needing to search.
+	const LIST_CAP = 2000;
 	const filteredMembers = $derived(
 		discovery.members
 			.filter((m) => `${m.login} ${m.name}`.toLowerCase().includes(memberQuery.toLowerCase()))
-			.slice(0, 200)
+			.slice(0, LIST_CAP)
 	);
 	const filteredRepos = $derived(
 		discovery.repos
 			.filter((r) => repoKey(r).toLowerCase().includes(repoQuery.toLowerCase()))
-			.slice(0, 200)
+			.slice(0, LIST_CAP)
 	);
 
 	function toggle(which: 'members' | 'repos', key: string) {
 		if (!draft) return;
 		const set = draft[which];
-		if (set.has(key)) set.delete(key);
-		else set.add(key);
+		if (set.has(key)) {
+			set.delete(key);
+			// Deselecting a repo drops its release-exclusion flag too.
+			if (which === 'repos') draft.noReleases.delete(key);
+		} else set.add(key);
 		draft = { ...draft }; // reassign to trigger reactivity
+	}
+
+	/** Toggle whether a (selected) repo's releases are excluded from the stats. */
+	function toggleNoReleases(key: string) {
+		if (!draft) return;
+		if (draft.noReleases.has(key)) draft.noReleases.delete(key);
+		else draft.noReleases.add(key);
+		draft = { ...draft };
 	}
 </script>
 
@@ -234,8 +260,11 @@
 							</div>
 							<div class="h-64 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
 								{#each viewing.repos as r (repoKey(r))}
-									<div class="flex items-center gap-2.5 px-3 py-1.5 text-sm">
+									<div class="flex items-center justify-between gap-2.5 px-3 py-1.5 text-sm">
 										<span class="font-mono text-[12px] text-[var(--color-ink-800)]">{r.owner}/<span class="text-[var(--color-ink-950)]">{r.repo}</span></span>
+										{#if r.noReleases}
+											<span class="shrink-0 text-[11px] text-[var(--color-ink-500)]" title="Releases excluded from the stats">no releases</span>
+										{/if}
 									</div>
 								{:else}
 									<div class="px-3 py-2 text-sm text-[var(--color-ink-500)]">No repositories.</div>
@@ -311,10 +340,19 @@
 								</div>
 								<div class="h-64 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
 									{#each filteredRepos as r (repoKey(r))}
-										<label class="flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-[var(--color-ink-50)]">
-											<input type="checkbox" checked={draft.repos.has(repoKey(r))} onchange={() => toggle('repos', repoKey(r))} class="accent-[var(--color-brand)]" />
-											<span class="font-mono text-[12px] text-[var(--color-ink-800)]">{r.owner}/<span class="text-[var(--color-ink-950)]">{r.repo}</span></span>
-										</label>
+										{@const key = repoKey(r)}
+										<div class="flex items-center justify-between gap-2 px-3 py-1.5 text-sm hover:bg-[var(--color-ink-50)]">
+											<label class="flex flex-1 cursor-pointer items-center gap-2.5">
+												<input type="checkbox" checked={draft.repos.has(key)} onchange={() => toggle('repos', key)} class="accent-[var(--color-brand)]" />
+												<span class="font-mono text-[12px] text-[var(--color-ink-800)]">{r.owner}/<span class="text-[var(--color-ink-950)]">{r.repo}</span></span>
+											</label>
+											{#if draft.repos.has(key)}
+												<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-[var(--color-ink-500)]" title="Exclude this repo's GitHub releases from the stats (e.g. a monorepo that publishes a release per package)">
+													<input type="checkbox" checked={draft.noReleases.has(key)} onchange={() => toggleNoReleases(key)} class="accent-[var(--color-brand)]" />
+													no releases
+												</label>
+											{/if}
+										</div>
 									{/each}
 								</div>
 							</div>

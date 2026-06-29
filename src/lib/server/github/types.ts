@@ -1,4 +1,10 @@
-export type Repo = { owner: string; repo: string };
+export type Repo = {
+	owner: string;
+	repo: string;
+	/** Exclude this repo's GitHub releases from the release stats (e.g. monorepos
+	 * that publish a release per package). Omitted = releases counted normally. */
+	noReleases?: boolean;
+};
 export type Member = { login: string; name: string; email?: string };
 
 /** One repository's metrics for one month. Mirrors the old RepoMonth shape so the

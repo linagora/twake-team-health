@@ -42,7 +42,7 @@ export function parseRepos(value: unknown, cap: number, allowed?: string[]): Rep
 		const key = `${r.owner}/${r.repo}`.toLowerCase(); // GitHub repos are case-insensitive
 		if (seen.has(key)) continue;
 		seen.add(key);
-		out.push({ owner: r.owner, repo: r.repo });
+		out.push({ owner: r.owner, repo: r.repo, ...(r.noReleases === true ? { noReleases: true } : {}) });
 		if (out.length >= cap) break;
 	}
 	return out;

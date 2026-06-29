@@ -43,27 +43,30 @@
 	let teamIds = $state<string[]>(initTeams);
 	let repoKeys = $state<string[]>(initRepos);
 
-	// Seed the team selection once teams are available: the scope bar's active team
-	// (else the first team). Skipped only when the URL already carried a selection,
-	// so a bare ?bmode link still auto-seeds instead of showing an empty view.
-	let seeded = $state(initTeams.length > 0 || initRepos.length > 0);
+	// Mirror the scope bar's active team into this page's own scope until the user
+	// takes control here, so changing the team up top also drives the Breakdown.
+	// The page is "customized" when a shared/bookmarked link already carried an
+	// explicit selection, or once the user touches this page's own mode/team/repo
+	// controls (which call markCustomized). From then on the Breakdown's scope is
+	// independent of the scope bar.
+	let customized = $state(initTeams.length > 0 || initRepos.length > 0);
+	const markCustomized = () => (customized = true);
 	$effect(() => {
-		if (!seeded && scope.teams.length) {
-			const id = scope.activeTeam?.id ?? scope.teams[0]?.id;
-			if (id) {
-				teamIds = [id];
-				seeded = true;
-			}
+		if (customized) return;
+		const id = scope.activeTeam?.id ?? scope.teams[0]?.id;
+		if (id && !(mode === 'team' && teamIds.length === 1 && teamIds[0] === id)) {
+			mode = 'team';
+			teamIds = [id];
 		}
 	});
 
 	// Mirror the selection into the URL (replace, no history entry), preserving the
-	// scope params the layout manages. Only writes on an actual change.
-	// Track selection changes (reading the state here registers the dependencies) and
-	// mirror them into the URL, merging with the scope params the layout manages.
+	// scope params the layout manages. Only the user's own (customized) selection is
+	// persisted: an auto-mirrored selection must NOT write ?bteams, or a reload would
+	// read it back as an explicit selection and permanently detach from the scope bar.
 	$effect(() => {
-		const teams = mode === 'team' ? teamIds : [];
-		const repos = mode === 'repo' ? repoKeys : [];
+		const teams = customized && mode === 'team' ? teamIds : [];
+		const repos = customized && mode === 'repo' ? repoKeys : [];
 		replaceSearchParams((params) => {
 			params.set('bmode', mode);
 			if (teams.length) params.set('bteams', teams.join(','));
@@ -127,7 +130,10 @@
 		<div class="inline-flex rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] p-0.5">
 			{#each MODES as opt (opt.k)}
 				<button
-					onclick={() => (mode = opt.k)}
+					onclick={() => {
+						markCustomized();
+						mode = opt.k;
+					}}
 					class="rounded-md px-3 py-1 text-sm transition-colors {mode === opt.k
 						? 'bg-[var(--color-brand)]/10 text-[var(--color-ink-950)]'
 						: 'text-[var(--color-ink-600)] hover:text-[var(--color-ink-900)]'}"
@@ -138,7 +144,7 @@
 		</div>
 
 		{#if mode === 'team'}
-			<Select.Root type="multiple" bind:value={teamIds}>
+			<Select.Root type="multiple" bind:value={teamIds} onValueChange={markCustomized}>
 				<Select.Trigger class="h-8 min-w-[180px] bg-[var(--color-card)]">
 					{teamIds.length ? `${teamIds.length} ${pluralize(teamIds.length, 'team')} selected` : 'Select teams'}
 				</Select.Trigger>
@@ -149,7 +155,7 @@
 				</Select.Content>
 			</Select.Root>
 		{:else}
-			<Select.Root type="multiple" bind:value={repoKeys}>
+			<Select.Root type="multiple" bind:value={repoKeys} onValueChange={markCustomized}>
 				<Select.Trigger class="h-8 min-w-[180px] bg-[var(--color-card)]">
 					{repoKeys.length ? `${repoKeys.length} ${pluralize(repoKeys.length, 'repo')} selected` : 'Select repos'}
 				</Select.Trigger>

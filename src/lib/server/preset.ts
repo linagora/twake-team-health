@@ -18,12 +18,15 @@ function parseEnvTeams(): RawTeam[] | null {
 		const parsed = JSON.parse(env.DEFAULT_TEAMS);
 		const arr = Array.isArray(parsed) ? parsed : [parsed];
 		return arr
-			.filter((t) => t && Array.isArray(t.repos) && t.repos.length)
+			.filter((t) => t && Array.isArray(t.repos))
 			.map((t) => ({
 				name: typeof t.name === 'string' ? t.name : undefined,
 				members: Array.isArray(t.members) ? t.members : [],
-				repos: t.repos as Repo[]
-			}));
+				repos: (t.repos as unknown[]).map(parseRepoRef).filter((r): r is Repo => !!r)
+			}))
+			// Drop teams left with no parseable repos (the guard is on real repos, not
+			// the raw count, so a team of all-malformed entries doesn't become repos:[]).
+			.filter((t) => t.repos.length > 0);
 	} catch {
 		return null;
 	}
@@ -59,7 +62,8 @@ function parseRepoRef(r: unknown): Repo | null {
 	}
 	if (r && typeof r === 'object') {
 		const o = r as Record<string, unknown>;
-		if (typeof o.owner === 'string' && typeof o.repo === 'string') return { owner: o.owner, repo: o.repo };
+		if (typeof o.owner === 'string' && typeof o.repo === 'string')
+			return { owner: o.owner, repo: o.repo, ...(o.noReleases === true ? { noReleases: true } : {}) };
 	}
 	return null;
 }
@@ -81,7 +85,12 @@ export function defaultGlobalRepos(): Repo[] {
 
 function dedupeRepos(repos: Repo[]): Repo[] {
 	const seen = new Map<string, Repo>();
-	for (const r of repos) seen.set(`${r.owner}/${r.repo}`, r);
+	for (const r of repos) {
+		const key = `${r.owner}/${r.repo}`;
+		// If any copy of a repo excludes releases, the deduped entry does too.
+		const noReleases = r.noReleases || seen.get(key)?.noReleases;
+		seen.set(key, { owner: r.owner, repo: r.repo, ...(noReleases ? { noReleases: true } : {}) });
+	}
 	return [...seen.values()].sort((a, b) => `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`));
 }
 

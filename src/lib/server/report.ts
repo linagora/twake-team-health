@@ -14,6 +14,7 @@ import {
 	fetchReviewRepoMonthRows
 } from './github/metrics';
 import { assembleMetrics, type MemberRepoMonthRow, type ReviewRepoMonthRow } from './store/assemble';
+import { excludeReleases, globalNoReleaseRepos } from './release-exclusions';
 import * as store from './store';
 import { hasDb } from './db';
 import { getAppSettings } from './app-config';
@@ -68,6 +69,9 @@ export async function getReport(
 		: lastNMonths(memberCount, now);
 	const currentKey = monthKey({ year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 });
 	const nowMs = now.getTime();
+	// Repos whose releases are excluded from the stats (global ignore-list + the
+	// selection's own per-repo flags); applied to the rows before aggregation.
+	const noReleases = globalNoReleaseRepos();
 
 	if (!hasDb()) {
 		console.warn(
@@ -79,7 +83,11 @@ export async function getReport(
 			fetchMemberRepoMonthRows(gql, selection.repos, selection.members, memberMonths),
 			fetchReviewRepoMonthRows(gql, selection.repos, memberMonths)
 		]);
-		return assembleMetrics({ repoRows, memberRows, reviewRows }, selection.members, nowMs);
+		return assembleMetrics(
+			{ repoRows: excludeReleases(repoRows, selection.repos, noReleases), memberRows, reviewRows },
+			selection.members,
+			nowMs
+		);
 	}
 
 	const [repoRes, memberRes] = await Promise.all([
@@ -101,7 +109,11 @@ export async function getReport(
 			`memberMonthsFetched=${memberRes.fetched}/${memberMonths.length}`
 	);
 	return assembleMetrics(
-		{ repoRows: repoRes.repoRows, memberRows: memberRes.rows, reviewRows: scopedReviews },
+		{
+			repoRows: excludeReleases(repoRes.repoRows, selection.repos, noReleases),
+			memberRows: memberRes.rows,
+			reviewRows: scopedReviews
+		},
 		selection.members,
 		nowMs
 	);
