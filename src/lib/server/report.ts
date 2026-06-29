@@ -245,6 +245,8 @@ function fillMemberGrid(
 						repo: r.repo,
 						month: monthKey(m),
 						commits: 0,
+						weekendCommits: 0,
+						lateNightCommits: 0,
 						mergedPrs: 0,
 						additions: 0,
 						deletions: 0

@@ -3,7 +3,9 @@ import {
 	prStatsForMonth,
 	issueStatsForMonth,
 	reviewCountsFromNodes,
-	pickCommitMember
+	pickCommitMember,
+	commitLocalTime,
+	classifyCommitTime
 } from './metrics';
 import { median, std, isBugLabel, makeBugMatcher } from './stats';
 import { lastNMonths, monthKey, monthEnd } from './months';
@@ -174,5 +176,32 @@ describe('pickCommitMember', () => {
 	});
 	it('returns null for a null author', () => {
 		expect(pickCommitMember(null, byLogin, byEmail)).toBeNull();
+	});
+});
+
+describe('commitLocalTime / classifyCommitTime', () => {
+	it('reads the committer-local wall clock from the embedded offset, not the server zone', () => {
+		// 22:45 in +02:00 is 20:45 UTC, but locally it is a late-night Friday commit.
+		expect(commitLocalTime('2026-06-12T22:45:00+02:00')).toEqual({ dow: 5, hour: 22 });
+		// Same UTC instant tagged -05:00 is 15:45 local: an ordinary weekday afternoon.
+		expect(commitLocalTime('2026-06-12T15:45:00-05:00')).toEqual({ dow: 5, hour: 15 });
+	});
+
+	it('flags weekend commits in local time', () => {
+		// Sunday 14:00 in Tokyo (+09:00).
+		expect(classifyCommitTime('2026-06-14T14:00:00+09:00')).toEqual({ weekend: true, lateNight: false });
+	});
+
+	it('flags late-night commits (22:00-05:59 local)', () => {
+		expect(classifyCommitTime('2026-06-10T02:30:00+01:00')).toEqual({ weekend: false, lateNight: true });
+		expect(classifyCommitTime('2026-06-10T22:00:00+01:00')).toEqual({ weekend: false, lateNight: true });
+		expect(classifyCommitTime('2026-06-10T09:00:00+01:00')).toEqual({ weekend: false, lateNight: false });
+	});
+
+	it('defaults to UTC for a Z-suffixed or zone-less timestamp and returns false buckets for garbage', () => {
+		expect(commitLocalTime('2026-06-13T23:00:00Z')).toEqual({ dow: 6, hour: 23 });
+		// No zone designator: pinned to UTC (not the server's locale) for determinism.
+		expect(commitLocalTime('2026-06-13T23:00:00')).toEqual({ dow: 6, hour: 23 });
+		expect(classifyCommitTime('not-a-date')).toEqual({ weekend: false, lateNight: false });
 	});
 });

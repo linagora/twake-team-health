@@ -63,7 +63,9 @@
 		{ key: 'reviewedWarnPct', label: 'Review coverage above (%)' },
 		{ key: 'throughputDropWarnPct', label: 'Throughput drop warns at (%)' },
 		{ key: 'busShareWarnPct', label: 'Knowledge concentration at (%)' },
-		{ key: 'reviewShareWarnPct', label: 'Review-load imbalance at (%)' }
+		{ key: 'reviewShareWarnPct', label: 'Review-load imbalance at (%)' },
+		{ key: 'weekendWarnPct', label: 'Weekend-commit burnout at (%)' },
+		{ key: 'lateNightWarnPct', label: 'Late-night-commit burnout at (%)' }
 	];
 
 	const inputCls =

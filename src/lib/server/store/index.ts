@@ -123,6 +123,8 @@ export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promis
 				target: [memberRepoMonth.login, memberRepoMonth.owner, memberRepoMonth.repo, memberRepoMonth.month],
 				set: {
 					commits: sqlExcluded('commits'),
+					weekendCommits: sqlExcluded('weekend_commits'),
+					lateNightCommits: sqlExcluded('late_night_commits'),
 					mergedPrs: sqlExcluded('merged_prs'),
 					additions: sqlExcluded('additions'),
 					deletions: sqlExcluded('deletions'),

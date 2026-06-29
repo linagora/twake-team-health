@@ -44,6 +44,13 @@ export type Targets = {
 	minReviewers: number; // need at least this many to judge balance
 	stageWarnH: number; // a single PR-lifecycle stage this slow is worth flagging
 	stageBadH: number;
+	// Burnout: share of a member's commits made on weekends (Sat/Sun) or late at
+	// night (22:00-05:59), measured in the author's own local time.
+	weekendWarnPct: number;
+	weekendBadPct: number;
+	lateNightWarnPct: number;
+	lateNightBadPct: number;
+	burnoutMinCommits: number; // ignore members with fewer commits than this
 };
 
 export const DEFAULT_TARGETS: Targets = {
@@ -69,7 +76,12 @@ export const DEFAULT_TARGETS: Targets = {
 	reviewShareBadPct: 70,
 	minReviewers: 3,
 	stageWarnH: 24,
-	stageBadH: 72
+	stageBadH: 72,
+	weekendWarnPct: 25,
+	weekendBadPct: 40,
+	lateNightWarnPct: 25,
+	lateNightBadPct: 40,
+	burnoutMinCommits: 15
 };
 
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
@@ -251,6 +263,39 @@ export function computeSignals(
 				? `${concentrated} ${concentrated === 1 ? 'repository depends' : 'repositories depend'} on a single maintainer.`
 				: 'No single-maintainer repositories detected.',
 			...(concentrated ? { people: concentratedList.map(({ login, note }) => ({ login, note })) } : {})
+		});
+	}
+
+	// Burnout risk: members doing an outsized share of their commits on weekends or
+	// late at night, judged in the author's own local time (so a 2am commit counts
+	// against the committer wherever they are, not against the server's clock).
+	if (metrics && metrics.workPattern?.length) {
+		const flagged: { login: string; note: string; level: SignalLevel }[] = [];
+		for (const w of metrics.workPattern) {
+			if (w.commits < t.burnoutMinCommits) continue;
+			const wkPct = Math.round((w.weekendCommits / w.commits) * 100);
+			const lnPct = Math.round((w.lateNightCommits / w.commits) * 100);
+			const wkLevel = highIsBad(wkPct, t.weekendWarnPct, t.weekendBadPct);
+			const lnLevel = highIsBad(lnPct, t.lateNightWarnPct, t.lateNightBadPct);
+			const level = SEVERITY[wkLevel] < SEVERITY[lnLevel] ? wkLevel : lnLevel;
+			if (level === 'ok') continue;
+			const parts: string[] = [];
+			if (wkLevel !== 'ok') parts.push(`${wkPct}% on weekends`);
+			if (lnLevel !== 'ok') parts.push(`${lnPct}% late at night`);
+			flagged.push({ login: w.author, note: `${parts.join(', ')} (of ${w.commits} commits)`, level });
+		}
+		// Sorted most-severe first, so the worst person's level is the signal's level.
+		flagged.sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
+		out.push({
+			id: 'burnout',
+			level: flagged[0]?.level ?? 'ok',
+			title: 'Burnout risk',
+			value: `${flagged.length} ${flagged.length === 1 ? 'person' : 'people'}`,
+			target: 'none',
+			detail: flagged.length
+				? `${flagged.length === 1 ? 'Someone is' : `${flagged.length} people are`} committing heavily on weekends or late at night.`
+				: 'No outsized weekend or late-night commit patterns.',
+			...(flagged.length ? { people: flagged.map(({ login, note }) => ({ login, note })) } : {})
 		});
 	}
 

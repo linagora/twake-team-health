@@ -57,6 +57,11 @@ export const memberRepoMonth = pgTable(
 		repo: text('repo').notNull(),
 		month: text('month').notNull(),
 		commits: integer('commits').notNull(),
+		// Burnout signals: how many of those commits landed on a weekend / late at
+		// night in the author's own local time. Default 0 so rows from before this
+		// column existed read as "unknown / none" rather than null.
+		weekendCommits: integer('weekend_commits').notNull().default(0),
+		lateNightCommits: integer('late_night_commits').notNull().default(0),
 		mergedPrs: integer('merged_prs').notNull(),
 		additions: integer('additions').notNull().default(0),
 		deletions: integer('deletions').notNull().default(0),

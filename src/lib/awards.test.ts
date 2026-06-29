@@ -32,6 +32,7 @@ const metrics = (over: Partial<MetricsResult> = {}): MetricsResult => ({
 		{ author: 'alice', additions: 100, deletions: 50 },
 		{ author: 'bob', additions: 10, deletions: 5 }
 	],
+	workPattern: [],
 	generatedAt: 0,
 	...over
 });

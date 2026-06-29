@@ -41,6 +41,9 @@ export type IssueMonth = { month: string; tickets: number; bugs: number };
 export type AuthorRepoCommits = { author: string; repo: string; commits: number };
 /** Lines added/removed by a member's merged PRs, over the window. */
 export type AuthorLines = { author: string; additions: number; deletions: number };
+/** When a member commits, over the window: total vs. the weekend / late-night
+ * (local-time) shares that feed burnout detection. */
+export type WorkPattern = { author: string; commits: number; weekendCommits: number; lateNightCommits: number };
 
 export type MetricsResult = {
 	repos: RepoMonth[];
@@ -50,6 +53,7 @@ export type MetricsResult = {
 	issuesByMonth: IssueMonth[];
 	commitsByAuthorRepo: AuthorRepoCommits[];
 	linesByAuthor: AuthorLines[];
+	workPattern: WorkPattern[];
 	generatedAt: number;
 };
 

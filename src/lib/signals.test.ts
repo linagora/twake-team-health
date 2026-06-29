@@ -5,10 +5,14 @@ import type {
 	AttentionResult,
 	FlowStats,
 	MetricsResult,
-	AuthorRepoCommits
+	AuthorRepoCommits,
+	WorkPattern
 } from './server/github/types';
 
-const metricsWith = (commitsByAuthorRepo: AuthorRepoCommits[]): MetricsResult => ({
+const metricsWith = (
+	commitsByAuthorRepo: AuthorRepoCommits[],
+	workPattern: WorkPattern[] = []
+): MetricsResult => ({
 	repos: [],
 	authors: [],
 	mergedByAuthor: [],
@@ -16,6 +20,7 @@ const metricsWith = (commitsByAuthorRepo: AuthorRepoCommits[]): MetricsResult =>
 	issuesByMonth: [],
 	commitsByAuthorRepo,
 	linesByAuthor: [],
+	workPattern,
 	generatedAt: 0
 });
 
@@ -144,6 +149,31 @@ describe('computeSignals', () => {
 			{ author: 'c', repo: 'o/a', commits: 30 }
 		]);
 		expect(find(computeSignals(m, null, null), 'bus-factor')?.level).toBe('ok');
+	});
+
+	it('flags burnout for heavy weekend / late-night committers, ignoring low-volume members', () => {
+		const m = metricsWith(
+			[],
+			[
+				{ author: 'weekendwarrior', commits: 40, weekendCommits: 20, lateNightCommits: 0 }, // 50% weekend -> bad
+				{ author: 'nightowl', commits: 40, weekendCommits: 0, lateNightCommits: 12 }, // 30% late -> warn
+				{ author: 'balanced', commits: 40, weekendCommits: 2, lateNightCommits: 2 }, // 5% each -> ok
+				{ author: 'newbie', commits: 4, weekendCommits: 4, lateNightCommits: 4 } // below burnoutMinCommits -> ignored
+			]
+		);
+		const sig = find(computeSignals(m, null, null), 'burnout');
+		expect(sig?.level).toBe('bad');
+		expect(sig?.value).toBe('2 people');
+		const logins = sig?.people?.map((p) => p.login) ?? [];
+		expect(logins).toContain('weekendwarrior');
+		expect(logins).toContain('nightowl');
+		expect(logins).not.toContain('balanced');
+		expect(logins).not.toContain('newbie');
+	});
+
+	it('passes burnout when commit timing is well spread', () => {
+		const m = metricsWith([], [{ author: 'steady', commits: 50, weekendCommits: 3, lateNightCommits: 3 }]);
+		expect(find(computeSignals(m, null, null), 'burnout')?.level).toBe('ok');
 	});
 
 	it('orders most severe first', () => {

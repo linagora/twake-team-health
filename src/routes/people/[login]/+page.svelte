@@ -26,6 +26,11 @@
 	const byRepo = $derived(
 		(stats?.commitsByAuthorRepo ?? []).filter((c) => lc(c.author) === lc(login)).sort((a, b) => b.commits - a.commits)
 	);
+	// Work pattern (weekend / late-night commit share, author-local time) for burnout.
+	const pattern = $derived((stats?.workPattern ?? []).find((w) => lc(w.author) === lc(login)));
+	const pct = (n: number) => (pattern && pattern.commits ? Math.round((n / pattern.commits) * 100) : 0);
+	const weekendPct = $derived(pct(pattern?.weekendCommits ?? 0));
+	const lateNightPct = $derived(pct(pattern?.lateNightCommits ?? 0));
 
 	const hasActivity = $derived(totalCommits > 0 || merged > 0 || review.reviews > 0 || lines.additions + lines.deletions > 0);
 </script>
@@ -87,6 +92,16 @@
 					<div class="eyebrow mb-2">Reviews given</div>
 					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{fmtNum(review.reviews)}</div>
 					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(review.comments)} comments</div>
+				</div>
+				<div>
+					<div class="eyebrow mb-2">Weekend commits</div>
+					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{weekendPct}%</div>
+					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(pattern?.weekendCommits ?? 0)} on Sat/Sun (local)</div>
+				</div>
+				<div>
+					<div class="eyebrow mb-2">Late-night commits</div>
+					<div class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{lateNightPct}%</div>
+					<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{fmtNum(pattern?.lateNightCommits ?? 0)} after 10pm (local)</div>
 				</div>
 			</section>
 

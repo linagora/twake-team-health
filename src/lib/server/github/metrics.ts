@@ -123,6 +123,37 @@ type ReviewPrNode = {
 
 type CommitNode = { oid: string; committedDate: string; author: { email: string | null; user: { login: string } | null } };
 
+// --- Burnout detection: when (in the author's own local time) was a commit made ---
+// GitHub's `committedDate` is a GitTimestamp: an ISO-8601 string that KEEPS the
+// committer's machine offset (e.g. ...T22:45:01+02:00), unlike DateTime which is
+// normalized to UTC. That offset is the closest per-commit proxy we have for the
+// person's timezone, so we read local wall-clock straight off it.
+
+/** Local weekday (0=Sun..6=Sat) and hour (0-23) as they read on the committer's
+ * own clock. `new Date(...)` would re-zone to the SERVER's locale, so instead we
+ * shift the UTC instant by the embedded offset and read the UTC fields back. */
+export function commitLocalTime(iso: string): { dow: number; hour: number } | null {
+	// Trailing "+HH:MM" / "-HH:MM"; "Z" (or a missing zone) means a zero offset.
+	const m = /([+-])(\d{2}):?(\d{2})$/.exec(iso);
+	// Force a zone-less timestamp to UTC: GitHub's committedDate always carries an
+	// offset, but a bare datetime would otherwise be parsed in the SERVER's locale,
+	// making the result machine-dependent. Pinning to UTC keeps it deterministic.
+	const hasZone = !!m || /[zZ]$/.test(iso);
+	const ms = Date.parse(hasZone ? iso : `${iso}Z`);
+	if (Number.isNaN(ms)) return null;
+	const offsetMin = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
+	const local = new Date(ms + offsetMin * 60_000);
+	return { dow: local.getUTCDay(), hour: local.getUTCHours() };
+}
+
+/** Classify a commit's local timestamp into the two burnout buckets: committed on
+ * a weekend (Sat/Sun), and/or in the late-night window (22:00-05:59). */
+export function classifyCommitTime(iso: string): { weekend: boolean; lateNight: boolean } {
+	const t = commitLocalTime(iso);
+	if (!t) return { weekend: false, lateNight: false };
+	return { weekend: t.dow === 0 || t.dow === 6, lateNight: t.hour >= 22 || t.hour < 6 };
+}
+
 /** Attribute a commit to exactly one member: a linked GitHub login wins, then a
  * (non-shared) author email, else nobody. One member per commit avoids the
  * double-count where login and email point at different people. */
@@ -460,7 +491,7 @@ export async function fetchMemberRepoMonthRows(
 		const k = `${login}::${owner}/${repo}::${month}`;
 		let r = acc.get(k);
 		if (!r) {
-			r = { login, owner, repo, month, commits: 0, mergedPrs: 0, additions: 0, deletions: 0 };
+			r = { login, owner, repo, month, commits: 0, weekendCommits: 0, lateNightCommits: 0, mergedPrs: 0, additions: 0, deletions: 0 };
 			acc.set(k, r);
 		}
 		return r;
@@ -505,23 +536,33 @@ export async function fetchMemberRepoMonthRows(
 						async (after) => fetchHistoryPage(gql, owner, repo, monthStart(m), monthEnd(m), after),
 						50
 					);
-					const shas = new Map<string, Set<string>>(); // member login -> unique SHAs
-					const add = (login: string, oid: string) => {
+					// member login -> unique SHA -> when (local) it was committed. Keyed by
+					// SHA so a commit seen via both a PR and the default branch counts once,
+					// and its weekend/late-night classification is computed a single time.
+					const shas = new Map<string, Map<string, { weekend: boolean; lateNight: boolean }>>();
+					const add = (login: string, c: CommitNode) => {
 						let s = shas.get(login);
-						if (!s) shas.set(login, (s = new Set()));
-						s.add(oid);
+						if (!s) shas.set(login, (s = new Map()));
+						if (!s.has(c.oid)) s.set(c.oid, classifyCommitTime(c.committedDate));
 					};
 					for (const c of prCommits) {
 						const t = Date.parse(c.committedDate);
 						if (t < startMs || t > endMs) continue;
 						const login = matchedMember(c.author);
-						if (login) add(login, c.oid);
+						if (login) add(login, c);
 					}
 					for (const c of mainCommits) {
 						const login = matchedMember(c.author);
-						if (login) add(login, c.oid);
+						if (login) add(login, c);
 					}
-					for (const [login, set] of shas) row(login, owner, repo, month).commits += set.size;
+					for (const [login, set] of shas) {
+						const r = row(login, owner, repo, month);
+						r.commits += set.size;
+						for (const cls of set.values()) {
+							if (cls.weekend) r.weekendCommits += 1;
+							if (cls.lateNight) r.lateNightCommits += 1;
+						}
+					}
 				})
 			);
 		})

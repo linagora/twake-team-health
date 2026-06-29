@@ -79,6 +79,7 @@ const DATA: MetricsResult = {
 		{ author: 'outsider', repo: 'linagora/cozy-home', commits: 99 }
 	],
 	linesByAuthor: [],
+	workPattern: [],
 	generatedAt: 0
 };
 

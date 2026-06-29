@@ -38,11 +38,11 @@ const rows: StoredRows = {
 		repo({ repo: 'cozy-admin', month: '2026-05', issues: 2, bugs: 1 })
 	],
 	memberRows: [
-		{ login: 'octocat', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 10, mergedPrs: 3, additions: 100, deletions: 20 },
-		{ login: 'octocat', owner: 'linagora', repo: 'cozy-admin', month: '2026-05', commits: 4, mergedPrs: 1, additions: 40, deletions: 10 },
-		{ login: 'octocat', owner: 'linagora', repo: 'cozy-home', month: '2026-06', commits: 6, mergedPrs: 2, additions: 60, deletions: 5 },
-		{ login: 'hubot', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 5, mergedPrs: 0, additions: 0, deletions: 0 },
-		{ login: 'stranger', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 99, mergedPrs: 9, additions: 999, deletions: 999 }
+		{ login: 'octocat', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 10, weekendCommits: 3, lateNightCommits: 1, mergedPrs: 3, additions: 100, deletions: 20 },
+		{ login: 'octocat', owner: 'linagora', repo: 'cozy-admin', month: '2026-05', commits: 4, weekendCommits: 1, lateNightCommits: 0, mergedPrs: 1, additions: 40, deletions: 10 },
+		{ login: 'octocat', owner: 'linagora', repo: 'cozy-home', month: '2026-06', commits: 6, weekendCommits: 0, lateNightCommits: 2, mergedPrs: 2, additions: 60, deletions: 5 },
+		{ login: 'hubot', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 5, weekendCommits: 0, lateNightCommits: 0, mergedPrs: 0, additions: 0, deletions: 0 },
+		{ login: 'stranger', owner: 'linagora', repo: 'cozy-home', month: '2026-05', commits: 99, weekendCommits: 99, lateNightCommits: 99, mergedPrs: 9, additions: 999, deletions: 999 }
 	],
 	reviewRows: [
 		{ reviewer: 'octocat', owner: 'linagora', repo: 'cozy-home', month: '2026-05', reviews: 7, comments: 2 },
@@ -79,6 +79,13 @@ describe('assembleMetrics', () => {
 
 	it('aggregates issues/bugs per month across repos', () => {
 		expect(r.issuesByMonth).toEqual([{ month: '2026-05', tickets: 6, bugs: 2 }]);
+	});
+
+	it('sums weekend/late-night commits per member over the window, members only', () => {
+		// octocat: 3+1 weekend, 1+2 late-night across the two months; total 20 commits.
+		expect(r.workPattern).toContainEqual({ author: 'octocat', commits: 20, weekendCommits: 4, lateNightCommits: 3 });
+		expect(r.workPattern).toContainEqual({ author: 'hubot', commits: 5, weekendCommits: 0, lateNightCommits: 0 });
+		expect(r.workPattern.some((w) => w.author === 'stranger')).toBe(false); // non-member
 	});
 
 	it('sums lines (additions/deletions) per member, members only', () => {

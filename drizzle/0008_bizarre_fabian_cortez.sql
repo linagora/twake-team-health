@@ -1,0 +1,2 @@
+ALTER TABLE "member_repo_month" ADD COLUMN "weekend_commits" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "member_repo_month" ADD COLUMN "late_night_commits" integer DEFAULT 0 NOT NULL;

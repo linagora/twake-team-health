@@ -8,7 +8,7 @@ const TTL_MS = Number(env.METRICS_CACHE_TTL_MS ?? 20 * 60 * 1000);
 
 function selectionKey(s: Selection): string {
 	return JSON.stringify({
-		v: 3, // bump when MetricsResult's shape changes
+		v: 4, // bump when MetricsResult's shape changes
 		// The `!nr` suffix and the global ignore-list both change which releases are
 		// counted, so two otherwise-identical selections must not share a cache entry.
 		repos: s.repos.map((r) => `${r.owner}/${r.repo}${r.noReleases ? '!nr' : ''}`).sort(),
