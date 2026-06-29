@@ -242,6 +242,37 @@ describe('computeSignals', () => {
 		expect(find(computeSignals(m, null, null), 'workload')?.level).toBe('ok');
 	});
 
+	it('attaches an improving trend when a latency metric falls vs its baseline', () => {
+		// firstReviewHours per month [20,20,20,4]; now=2026-06 keeps all 4 as complete.
+		// last 4 vs median(20,20,20)=20 -> big drop -> "better" (lower is better).
+		const flow = flowWith({ firstReviewHours: 4 }, [10, 10, 10, 10]);
+		flow.byMonth = flow.byMonth.map((m, i) => ({ ...m, firstReviewHours: [20, 20, 20, 4][i] }));
+		const sig = find(computeSignals(null, flow, null, DEFAULT_TARGETS, '2026-06'), 'first-review');
+		expect(sig?.trend?.dir).toBe('better');
+		expect(sig?.trend?.points).toEqual([20, 20, 20, 4]);
+	});
+
+	it('marks a worsening trend when review coverage falls', () => {
+		const flow = flowWith({ reviewedPct: 50 }, [10, 10, 10, 10]);
+		flow.byMonth = flow.byMonth.map((m, i) => ({ ...m, reviewedPct: [95, 95, 95, 50][i] }));
+		const sig = find(computeSignals(null, flow, null, DEFAULT_TARGETS, '2026-06'), 'review-coverage');
+		expect(sig?.trend?.dir).toBe('worse'); // coverage dropping is bad (higher is better)
+	});
+
+	it('attaches a trend to the bottleneck stage from the slowest stage per month', () => {
+		const flow = flowWith({ firstReviewHours: 4, reviewHours: 20 }, [10, 10, 10]);
+		flow.byMonth = flow.byMonth.map((m, i) => ({ ...m, firstReviewHours: 4, reviewHours: [80, 80, 20][i] }));
+		const sig = find(computeSignals(null, flow, null, DEFAULT_TARGETS, '2026-06'), 'bottleneck');
+		expect(sig?.trend?.points).toEqual([80, 80, 20]); // max(4, reviewHours) per month
+		expect(sig?.trend?.dir).toBe('better'); // the slowest stage shrinking is good
+	});
+
+	it('omits the trend when there is only one complete month', () => {
+		const flow = flowWith({}, [10, 5]); // months 2026-01, 2026-02
+		const sig = find(computeSignals(null, flow, null, DEFAULT_TARGETS, '2026-02'), 'first-review');
+		expect(sig?.trend).toBeUndefined(); // only 2026-01 is complete -> < 2 points
+	});
+
 	it('orders most severe first', () => {
 		const sig = computeSignals(
 			null,

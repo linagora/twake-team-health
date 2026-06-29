@@ -6,9 +6,17 @@
 	import { attention } from '$lib/client/attention.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import { computeSignals, DEFAULT_TARGETS, type SignalLevel } from '$lib/signals';
-	import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, Loader2 } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, Loader2, TrendingUp, TrendingDown, Minus } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
+	import MiniAreaChart from '$lib/components/charts/MiniAreaChart.svelte';
 	import { page } from '$app/state';
+
+	// Trend direction reads as a verdict, not raw slope: "better" is always the
+	// green up-arrow even for metrics where the underlying number fell (e.g. latency).
+	const trendColor = (dir: 'better' | 'worse' | 'flat') =>
+		dir === 'better' ? 'var(--color-positive)' : dir === 'worse' ? 'var(--color-negative)' : 'var(--color-ink-400)';
+	const trendIcon = (dir: 'better' | 'worse' | 'flat') =>
+		dir === 'better' ? TrendingUp : dir === 'worse' ? TrendingDown : Minus;
 
 	const team = $derived(scope.activeTeam);
 	// Admin-configurable health targets (falls back to defaults).
@@ -121,6 +129,15 @@
 								<div class="font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-ink-500)]">
 									target {s.target}
 								</div>
+								{#if s.trend}
+									{@const Icon = trendIcon(s.trend.dir)}
+									<div class="mt-2 flex items-center justify-end gap-1.5" title="vs recent months">
+										<!-- Neutral stroke: the line shows the raw metric shape; the arrow alone
+										     carries the better/worse verdict (a falling latency is good but slopes down). -->
+										<MiniAreaChart values={s.trend.points} width={60} height={18} stroke="var(--color-ink-400)" />
+										<Icon class="h-3.5 w-3.5 shrink-0" style="color: {trendColor(s.trend.dir)}" />
+									</div>
+								{/if}
 							</div>
 						</div>
 					</Card.Root>
@@ -138,7 +155,13 @@
 								<CheckCircle2 class="h-3.5 w-3.5 text-[var(--color-positive)]" />
 								{s.title}
 							</span>
-							<span class="font-mono text-xs tabular text-[var(--color-ink-600)]">{s.value}</span>
+							<span class="flex items-center gap-1.5 font-mono text-xs tabular text-[var(--color-ink-600)]">
+								{#if s.trend}
+									{@const Icon = trendIcon(s.trend.dir)}
+									<span title="vs recent months" class="inline-flex"><Icon class="h-3 w-3 shrink-0" style="color: {trendColor(s.trend.dir)}" /></span>
+								{/if}
+								{s.value}
+							</span>
 						</div>
 					{/each}
 				</div>

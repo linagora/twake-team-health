@@ -6,6 +6,12 @@ import { monthKeyOf } from './months';
 
 export type SignalLevel = 'ok' | 'warn' | 'bad';
 
+/** A signal's recent history: the monthly series (oldest first) for a sparkline,
+ * plus whether the latest month is better/worse/flat against the prior baseline.
+ * Only attached to signals backed by a per-month metric (the flow checks); the
+ * live/aggregate signals (attention, bus-factor, burnout, workload) have none. */
+export type SignalTrend = { points: number[]; dir: 'better' | 'worse' | 'flat' };
+
 export type Signal = {
 	id: string;
 	level: SignalLevel;
@@ -17,6 +23,8 @@ export type Signal = {
 	people?: { login: string; note: string }[];
 	/** Where to dig in: an in-app route this signal drills into (e.g. the attention worklist). */
 	link?: { href: string; label: string };
+	/** Recent month-over-month direction, when the signal has a monthly series. */
+	trend?: SignalTrend;
 };
 
 export type Targets = {
@@ -113,6 +121,20 @@ const median = (xs: number[]): number => {
 	return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+/** Direction of the latest month against the median of the months before it.
+ * `betterWhenLower` is true for metrics where smaller is healthier (latency,
+ * cycle time). Changes within 10% of the baseline read as flat (noise). Needs at
+ * least two months; returns undefined otherwise so no sparkline is shown. */
+function trendOf(points: number[], betterWhenLower: boolean): SignalTrend | undefined {
+	if (points.length < 2) return undefined;
+	const last = points[points.length - 1];
+	const prior = median(points.slice(0, -1));
+	const change = last - prior;
+	const rel = prior !== 0 ? Math.abs(change) / prior : last !== 0 ? 1 : 0;
+	const dir = rel < 0.1 ? 'flat' : (betterWhenLower ? change < 0 : change > 0) ? 'better' : 'worse';
+	return { points, dir };
+}
+
 /** Compute the full set of signals (including passing ones), most severe first. */
 export function computeSignals(
 	metrics: MetricsResult | null,
@@ -125,13 +147,21 @@ export function computeSignals(
 
 	if (flow && flow.overall.count > 0) {
 		const o = flow.overall;
+		// Complete months (oldest first), excluding the partial current one, drive the
+		// per-signal sparklines so an in-progress month never reads as a dip/spike.
+		const completeMonths = [...flow.byMonth]
+			.filter((m) => m.month < nowMonthKey)
+			.sort((a, b) => a.month.localeCompare(b.month));
+		const trend = (pick: (m: (typeof completeMonths)[number]) => number, betterWhenLower: boolean) =>
+			trendOf(completeMonths.map(pick), betterWhenLower);
 		out.push({
 			id: 'first-review',
 			level: highIsBad(o.firstReviewHours, t.firstReviewWarnH, t.firstReviewBadH),
 			title: 'Time to first review',
 			value: dur(o.firstReviewHours),
 			target: `under ${t.firstReviewWarnH}h`,
-			detail: 'Median wait from opening a PR to its first review. Long waits stall everyone downstream.'
+			detail: 'Median wait from opening a PR to its first review. Long waits stall everyone downstream.',
+			trend: trend((m) => m.firstReviewHours, true)
 		});
 		out.push({
 			id: 'cycle-time',
@@ -139,7 +169,8 @@ export function computeSignals(
 			title: 'Cycle time',
 			value: dur(o.mergeHours),
 			target: `under ${dur(t.cycleWarnH)}`,
-			detail: 'Median time from opening a PR to merging it.'
+			detail: 'Median time from opening a PR to merging it.',
+			trend: trend((m) => m.mergeHours, true)
 		});
 		out.push({
 			id: 'review-coverage',
@@ -147,7 +178,8 @@ export function computeSignals(
 			title: 'Review coverage',
 			value: `${o.reviewedPct}%`,
 			target: `at least ${t.reviewedWarnPct}%`,
-			detail: 'Share of merged PRs that got at least one review.'
+			detail: 'Share of merged PRs that got at least one review.',
+			trend: trend((m) => m.reviewedPct, false)
 		});
 
 		// Bottleneck: which half of the cycle eats the most time. pickup + review
@@ -166,16 +198,17 @@ export function computeSignals(
 			title: 'Slowest PR stage',
 			value: dur(top.h),
 			target: `under ${dur(t.stageWarnH)}`,
-			detail: `Most reviewable PR time is spent ${top.name} (${share}% of the tracked stages).`
+			detail: `Most reviewable PR time is spent ${top.name} (${share}% of the tracked stages).`,
+			// The slowest stage shrinking is an improvement, so lower is better.
+			trend: trend((m) => Math.max(m.firstReviewHours, m.reviewHours ?? 0), true)
 		});
 
 		// Throughput anomaly: the last completed month vs the median of the months
 		// before it. Exclude only the current (partial) calendar month — for a
 		// historical window the final month is complete and must be kept.
-		const complete = flow.byMonth.filter((m) => m.month < nowMonthKey);
-		if (complete.length >= 3) {
-			const last = complete[complete.length - 1].count;
-			const baseline = median(complete.slice(0, -1).map((m) => m.count));
+		if (completeMonths.length >= 3) {
+			const last = completeMonths[completeMonths.length - 1].count;
+			const baseline = median(completeMonths.slice(0, -1).map((m) => m.count));
 			const dropPct = baseline > 0 ? Math.round(((baseline - last) / baseline) * 100) : 0;
 			out.push({
 				id: 'throughput-drop',
@@ -186,7 +219,8 @@ export function computeSignals(
 				detail:
 					dropPct > 0
 						? `Last full month was ${dropPct}% below the recent median.`
-						: 'Last full month is in line with recent months.'
+						: 'Last full month is in line with recent months.',
+				trend: trend((m) => m.count, false)
 			});
 		}
 
