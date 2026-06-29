@@ -1,9 +1,15 @@
 <script lang="ts">
 	import { signIn } from '@auth/sveltekit/client';
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
+	import { theme } from '$lib/client/theme.svelte';
 	import linagoraLogo from '$lib/assets/linagora-logo.svg';
 	import twakeLogo from '$lib/assets/twake-logo.svg';
-	import { LogIn, Loader2 } from '@lucide/svelte';
+	import { LogIn, Loader2, Sun, Moon } from '@lucide/svelte';
+
+	// Sync with the theme the boot script already applied, so the toggle reflects
+	// (and persists) the user's choice even on this standalone page.
+	onMount(() => theme.init());
 
 	// orgName comes from the root layout load; callbackUrl/error from the query string
 	// (Auth.js redirects back here with ?error= on a failed sign-in).
@@ -24,7 +30,16 @@
 
 <svelte:head><title>Sign in · team·health</title></svelte:head>
 
-<div class="flex min-h-screen flex-col items-center justify-center bg-[var(--color-ink-0)] px-6 py-12">
+<div class="relative flex min-h-screen flex-col items-center justify-center bg-[var(--color-ink-0)] px-6 py-12">
+	<button
+		onclick={() => theme.toggle()}
+		class="absolute right-4 top-4 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] p-2 text-[var(--color-ink-600)] transition-colors hover:text-[var(--color-ink-900)]"
+		aria-label="Toggle dark mode"
+		title={theme.current === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+	>
+		{#if theme.current === 'dark'}<Sun class="h-4 w-4" />{:else}<Moon class="h-4 w-4" />{/if}
+	</button>
+
 	<div class="w-full max-w-sm">
 		<!-- Brand mark + wordmark, echoing the sidebar header. -->
 		<div class="mb-8 flex flex-col items-center text-center">
