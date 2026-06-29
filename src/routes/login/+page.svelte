@@ -15,15 +15,20 @@
 	// (Auth.js redirects back here with ?error= on a failed sign-in).
 	const orgName = $derived((page.data.orgName as string) || 'Engineering metrics');
 	const callbackUrl = $derived(page.url.searchParams.get('callbackUrl') || '/');
-	const authError = $derived(page.url.searchParams.get('error'));
+	// An error in the query (Auth.js redirect) or a thrown signIn (provider down /
+	// misconfigured) both surface the same banner instead of failing silently.
+	let signinFailed = $state(false);
+	const showError = $derived(!!page.url.searchParams.get('error') || signinFailed);
 
 	let busy = $state(false);
 	async function login() {
 		busy = true;
+		signinFailed = false;
 		try {
 			await signIn('oidc', { callbackUrl });
 		} catch {
 			busy = false; // signIn navigates away on success; reset only if it threw
+			signinFailed = true;
 		}
 	}
 </script>
@@ -33,7 +38,7 @@
 <div class="relative flex min-h-screen flex-col items-center justify-center bg-[var(--color-ink-0)] px-6 py-12">
 	<button
 		onclick={() => theme.toggle()}
-		class="absolute right-4 top-4 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] p-2 text-[var(--color-ink-600)] transition-colors hover:text-[var(--color-ink-900)]"
+		class="absolute right-4 top-4 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] p-2 text-[var(--color-ink-600)] transition-colors hover:text-[var(--color-ink-900)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[var(--color-brand)]/40"
 		aria-label="Toggle dark mode"
 		title={theme.current === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
 	>
@@ -61,7 +66,7 @@
 				Use your organization account to access live engineering-delivery metrics.
 			</p>
 
-			{#if authError}
+			{#if showError}
 				<p class="mt-4 rounded-lg border border-[var(--color-negative)]/30 bg-[var(--color-negative)]/10 px-3 py-2 text-xs text-[var(--color-negative)]">
 					Sign-in didn't complete. Please try again.
 				</p>
