@@ -1,12 +1,11 @@
 <script lang="ts">
 	import Topbar from '$lib/components/Topbar.svelte';
 	import * as Card from '$lib/components/ui/card';
-	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';
 	import { repoKey, parseRepoKey } from '$lib/client/selection';
-	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw, Building2, ShieldCheck, Bug } from '@lucide/svelte';
+	import { Check, Loader2, AlertCircle, GitBranch, CalendarRange, Activity, TriangleAlert, Server, RefreshCw, Building2, ShieldCheck, Bug, Search } from '@lucide/svelte';
 
 	let { data } = $props();
 
@@ -26,6 +25,29 @@
 	let bugLabels = $state(s.bugLabels.join(', '));
 	let signals = $state({ ...s.signals });
 	let repoKeys = $state<string[]>([...initialKeys]);
+	let repoQuery = $state('');
+	const selectedRepos = $derived(new Set(repoKeys));
+	// Selected repos sort to the top, but the ordering is pinned to a snapshot that
+	// only refreshes when the search changes (not on every toggle), so checking a box
+	// doesn't make its row jump out from under the cursor mid-edit.
+	let sortPinned = $state(new Set<string>());
+	$effect(() => {
+		repoQuery; // re-pin when the search changes (and once on mount)
+		sortPinned = new Set(untrack(() => repoKeys));
+	});
+	const filteredRepoOptions = $derived(
+		repoOptions
+			.filter((k) => k.toLowerCase().includes(repoQuery.toLowerCase()))
+			.sort((a, b) => {
+				const sa = sortPinned.has(a);
+				const sb = sortPinned.has(b);
+				if (sa !== sb) return sa ? -1 : 1;
+				return a.localeCompare(b);
+			})
+	);
+	function toggleRepo(key: string) {
+		repoKeys = selectedRepos.has(key) ? repoKeys.filter((k) => k !== key) : [...repoKeys, key];
+	}
 	const admins = untrack(() => data).admins;
 
 	let saving = $state(false);
@@ -132,16 +154,24 @@
 			</div>
 			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">Repositories aggregated in the Global trends view.</p>
 			<div class="mt-4">
-				<Select.Root type="multiple" bind:value={repoKeys}>
-					<Select.Trigger class="h-9 w-full bg-[var(--color-card)]">
-						{repoKeys.length ? `${repoKeys.length} repositories selected` : 'Select repositories'}
-					</Select.Trigger>
-					<Select.Content class="max-h-72">
-						{#each repoOptions as key (key)}
-							<Select.Item value={key} label={key}>{key}</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
+				<div class="mb-2 flex items-center justify-between">
+					<span class="eyebrow">Repositories</span>
+					<span class="font-mono text-[11px] text-[var(--color-ink-600)]">{repoKeys.length} selected</span>
+				</div>
+				<div class="relative mb-2">
+					<Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-ink-500)]" />
+					<input bind:value={repoQuery} placeholder="Search repositories" aria-label="Search repositories" class="w-full rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] py-1.5 pl-8 pr-3 text-sm focus:border-[var(--color-brand)] focus:outline-none" />
+				</div>
+				<div class="h-72 overflow-y-auto rounded-lg border border-[var(--color-ink-200)]">
+					{#each filteredRepoOptions as key (key)}
+						<label class="flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-[var(--color-ink-50)]">
+							<input type="checkbox" checked={selectedRepos.has(key)} onchange={() => toggleRepo(key)} class="accent-[var(--color-brand)]" />
+							<span class="font-mono text-[12px] text-[var(--color-ink-800)]">{key}</span>
+						</label>
+					{:else}
+						<div class="px-3 py-2 text-sm text-[var(--color-ink-500)]">No repositories match.</div>
+					{/each}
+				</div>
 			</div>
 		</Card.Root>
 
