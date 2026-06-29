@@ -145,17 +145,26 @@
 					<div class="eyebrow mb-2">Health signals</div>
 					<h3 class="font-display text-[1.75rem] leading-none tracking-tight">Burnout & workload</h3>
 				</div>
-				<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+				<div class="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-3">
 					{#each health as h (h.label)}
-						{@const color = h.muted ? 'var(--color-ink-400)' : accent[h.level]}
-						<Card.Root
-							class="gap-0 border p-5 shadow-sm"
-							style="border-left: 4px solid {color}; border-color: color-mix(in oklab, {color} 28%, var(--color-ink-200)); background: color-mix(in oklab, {color} 8%, var(--color-card))"
-						>
-							<div class="text-sm text-[var(--color-ink-700)]">{h.label}</div>
-							<div class="mt-2 font-display tabular text-3xl leading-none" style="color: {color}">{h.value}</div>
-							<div class="mt-2 font-mono text-xs text-[var(--color-ink-500)]">{h.note}</div>
-						</Card.Root>
+						{@const flagged = !h.muted && h.level !== 'ok'}
+						<div>
+							<div class="eyebrow mb-2">{h.label}</div>
+							<div class="flex items-baseline gap-2">
+								<span class="font-display tabular text-4xl leading-none text-[var(--color-ink-950)]">{h.value}</span>
+								{#if flagged}
+									<!-- Status is a small accent, not a fully colored card, so the section
+									     stays consistent with the neutral stat cards above. -->
+									<span
+										class="rounded px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em]"
+										style="color: {accent[h.level]}; background: color-mix(in oklab, {accent[h.level]} 14%, transparent)"
+									>
+										{h.level === 'bad' ? 'High' : 'Elevated'}
+									</span>
+								{/if}
+							</div>
+							<div class="mt-2 font-mono text-xs text-[var(--color-ink-600)]">{h.note}</div>
+						</div>
 					{/each}
 				</div>
 			</section>
