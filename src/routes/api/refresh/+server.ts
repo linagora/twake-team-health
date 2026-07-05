@@ -28,11 +28,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			selection.repos,
 			shape.spanStartDay,
 			shape.activityStartDay,
-			{
-				force: true,
-				bugLabels,
-				now,
-			},
+			shape.activityStartDay,
+			{ force: true, bugLabels, now },
 		);
 		const result = await refreshMetrics(selection);
 		await audit(locals.user.sub, 'metrics.refresh', {

@@ -63,6 +63,9 @@ const review = (o: Partial<ReviewFact>): ReviewFact => ({
 	reviewer: 'bob',
 	kind: 'review',
 	state: 'APPROVED',
+	isBot: false,
+	avatarUrl: null,
+	commentsCount: 0,
 	ts: d('2026-06-10T10:00:00Z'),
 	...o,
 });

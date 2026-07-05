@@ -1,12 +1,14 @@
+import { env } from '$env/dynamic/private';
 import { getMetrics } from './metrics-cache';
 import { getAttention } from './attention-cache';
+import { pruneEvents } from './store/audit';
 import {
 	defaultTeams,
 	defaultGlobalRepos,
 	defaultSelection,
 	GLOBAL_MONTHS,
 	DEFAULT_MONTHS,
-	DEFAULT_MEMBER_MONTHS
+	DEFAULT_MEMBER_MONTHS,
 } from './preset';
 import { getAppSettings } from './app-config';
 import { computeSignals, scopeKey } from '$lib/signals';
@@ -14,11 +16,20 @@ import { upsertSignalSnapshots } from './signal-history';
 import { withTeamTz } from '$lib/tz';
 import type { Member, Repo, Selection } from './github/types';
 
+const retentionEnv = Number(env.AUDIT_RETENTION_DAYS);
+const AUDIT_RETENTION_DAYS = Number.isFinite(retentionEnv) && retentionEnv > 0 ? retentionEnv : 90;
+
 const repoKey = (r: Repo) => `${r.owner}/${r.repo}`;
 const dedupeRepos = (repos: Repo[]) => [...new Map(repos.map((r) => [repoKey(r), r])).values()];
-const dedupeMembers = (members: Member[]) => [...new Map(members.map((m) => [m.login, m])).values()];
+const dedupeMembers = (members: Member[]) => [
+	...new Map(members.map((m) => [m.login, m])).values(),
+];
 
-export type WarmResult = { warmed: string[]; failed: { label: string; error: string }[]; repos: number };
+export type WarmResult = {
+	warmed: string[];
+	failed: { label: string; error: string }[];
+	repos: number;
+};
 
 /**
  * Refresh the data the app serves so user requests stay warm and never trigger a
@@ -41,7 +52,10 @@ export async function warmAll(): Promise<WarmResult> {
 	const warmScope = async (selection: Selection) => {
 		const metrics = await getMetrics(selection);
 		try {
-			await upsertSignalSnapshots(scopeKey(selection.repos), computeSignals(metrics, null, null, targets));
+			await upsertSignalSnapshots(
+				scopeKey(selection.repos),
+				computeSignals(metrics, null, null, targets),
+			);
 		} catch (e) {
 			console.warn(`[warm] signal snapshot failed: ${(e as Error).message}`);
 		}
@@ -55,8 +69,8 @@ export async function warmAll(): Promise<WarmResult> {
 					repos: t.repos,
 					members: withTeamTz(t.members, t.tz),
 					months: DEFAULT_MONTHS,
-					memberMonths: DEFAULT_MEMBER_MONTHS
-				} satisfies Selection)
+					memberMonths: DEFAULT_MEMBER_MONTHS,
+				} satisfies Selection),
 		})),
 		{
 			label: 'global',
@@ -65,11 +79,14 @@ export async function warmAll(): Promise<WarmResult> {
 					repos: globalRepos,
 					members: allMembers,
 					months: GLOBAL_MONTHS,
-					memberMonths: DEFAULT_MEMBER_MONTHS
-				} satisfies Selection)
+					memberMonths: DEFAULT_MEMBER_MONTHS,
+				} satisfies Selection),
 		},
 		{ label: 'default', run: () => warmScope(defaultSelection()) },
-		{ label: 'attention', run: () => getAttention(allRepos) }
+		{ label: 'attention', run: () => getAttention(allRepos) },
+		// Event-log retention: the wide per-request log grows forever otherwise.
+		// A no-op DELETE when nothing is expired, so running each pass is fine.
+		{ label: 'audit-prune', run: () => pruneEvents(AUDIT_RETENTION_DAYS) },
 	];
 
 	const warmed: string[] = [];

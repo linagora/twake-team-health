@@ -283,7 +283,7 @@ async function runChunkedAliases(
 // read time in the aggregator.
 const PR_FACT_FIELDS = `... on PullRequest { number author { login } createdAt mergedAt closedAt additions deletions comments { totalCount } reviews { totalCount } }`;
 const ISSUE_FACT_FIELDS = `... on Issue { number createdAt closedAt labels(first: 10) { nodes { name } } }`;
-const REVIEW_FACT_PR_FIELDS = `... on PullRequest { number author { login } reviews(first: 50) { nodes { id author { login } submittedAt state } } comments(first: 100) { nodes { id author { login } createdAt } } }`;
+const REVIEW_FACT_PR_FIELDS = `... on PullRequest { number author { login } reviews(first: 100) { nodes { id author { login __typename avatarUrl } submittedAt state comments { totalCount } } } comments(first: 100) { nodes { id author { login __typename avatarUrl } createdAt } } }`;
 const FLOW_PR_NODE_FIELDS = `... on PullRequest { createdAt mergedAt reviews(first: 100) { nodes { submittedAt state author { login __typename avatarUrl } comments { totalCount } } } }`;
 
 /** Inclusive day range, "YYYY-MM-DD". Callers slice long spans into
@@ -421,13 +421,16 @@ export async function fetchPrFactRows(
 	ranges: DayRange[],
 ): Promise<PrFact[]> {
 	const byNumber = new Map<number, PrFact>();
-	for (const { s, e } of ranges) {
-		const queries = [
-			`repo:${owner}/${repo} type:pr created:${s}..${e}`,
-			`repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}`,
-		];
-		for (const q of queries) {
-			for (const pr of await searchAllNodes(gql, q, PR_FACT_FIELDS)) {
+	// All (range x created/closed) searches in parallel: the GraphQL client's
+	// semaphore bounds global concurrency, so serializing here only added latency.
+	const queries = ranges.flatMap(({ s, e }) => [
+		`repo:${owner}/${repo} type:pr created:${s}..${e}`,
+		`repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}`,
+	]);
+	const pages = await Promise.all(queries.map((q) => searchAllNodes(gql, q, PR_FACT_FIELDS)));
+	{
+		for (const pr of pages.flat()) {
+			{
 				if (!pr || typeof pr.number !== 'number' || !pr.createdAt) continue;
 				byNumber.set(pr.number, {
 					owner,
@@ -455,13 +458,14 @@ export async function fetchIssueFactRows(
 	ranges: DayRange[],
 ): Promise<IssueFact[]> {
 	const byNumber = new Map<number, IssueFact>();
-	for (const { s, e } of ranges) {
-		const queries = [
-			`repo:${owner}/${repo} type:issue created:${s}..${e}`,
-			`repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}`,
-		];
-		for (const q of queries) {
-			for (const issue of await searchAllNodes(gql, q, ISSUE_FACT_FIELDS)) {
+	const queries = ranges.flatMap(({ s, e }) => [
+		`repo:${owner}/${repo} type:issue created:${s}..${e}`,
+		`repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}`,
+	]);
+	const pages = await Promise.all(queries.map((q) => searchAllNodes(gql, q, ISSUE_FACT_FIELDS)));
+	{
+		for (const issue of pages.flat()) {
+			{
 				if (!issue || typeof issue.number !== 'number' || !issue.createdAt) continue;
 				byNumber.set(issue.number, {
 					owner,
@@ -486,40 +490,52 @@ export async function fetchReviewFactRows(
 	ranges: DayRange[],
 ): Promise<ReviewFact[]> {
 	const byId = new Map<string, ReviewFact>();
-	for (const { s, e } of ranges) {
-		const q = `repo:${owner}/${repo} type:pr updated:${s}..${e}`;
-		for (const pr of await searchAllNodes(gql, q, REVIEW_FACT_PR_FIELDS)) {
-			if (!pr || typeof pr.number !== 'number') continue;
-			const prAuthor = pr.author?.login ?? null;
-			for (const r of pr.reviews?.nodes ?? []) {
-				// PENDING reviews have no submittedAt and are not activity yet.
-				if (!r?.id || !r.author?.login || !r.submittedAt) continue;
-				byId.set(r.id, {
-					owner,
-					repo,
-					id: r.id,
-					prNumber: pr.number,
-					prAuthor,
-					reviewer: r.author.login,
-					kind: 'review',
-					state: r.state ?? null,
-					ts: new Date(r.submittedAt),
-				});
-			}
-			for (const c of pr.comments?.nodes ?? []) {
-				if (!c?.id || !c.author?.login || !c.createdAt) continue;
-				byId.set(c.id, {
-					owner,
-					repo,
-					id: c.id,
-					prNumber: pr.number,
-					prAuthor,
-					reviewer: c.author.login,
-					kind: 'comment',
-					state: null,
-					ts: new Date(c.createdAt),
-				});
-			}
+	const pages = await Promise.all(
+		ranges.map(({ s, e }) =>
+			searchAllNodes(
+				gql,
+				`repo:${owner}/${repo} type:pr updated:${s}..${e}`,
+				REVIEW_FACT_PR_FIELDS,
+			),
+		),
+	);
+	for (const pr of pages.flat()) {
+		if (!pr || typeof pr.number !== 'number') continue;
+		const prAuthor = pr.author?.login ?? null;
+		for (const r of pr.reviews?.nodes ?? []) {
+			// PENDING reviews have no submittedAt and are not activity yet.
+			if (!r?.id || !r.author?.login || !r.submittedAt) continue;
+			byId.set(r.id, {
+				owner,
+				repo,
+				id: r.id,
+				prNumber: pr.number,
+				prAuthor,
+				reviewer: r.author.login,
+				kind: 'review',
+				state: r.state ?? null,
+				isBot: r.author.__typename === 'Bot',
+				avatarUrl: r.author.avatarUrl ?? null,
+				commentsCount: r.comments?.totalCount ?? 0,
+				ts: new Date(r.submittedAt),
+			});
+		}
+		for (const c of pr.comments?.nodes ?? []) {
+			if (!c?.id || !c.author?.login || !c.createdAt) continue;
+			byId.set(c.id, {
+				owner,
+				repo,
+				id: c.id,
+				prNumber: pr.number,
+				prAuthor,
+				reviewer: c.author.login,
+				kind: 'comment',
+				state: null,
+				isBot: c.author.__typename === 'Bot',
+				avatarUrl: c.author.avatarUrl ?? null,
+				commentsCount: 0,
+				ts: new Date(c.createdAt),
+			});
 		}
 	}
 	return [...byId.values()];

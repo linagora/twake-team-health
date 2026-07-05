@@ -1,4 +1,4 @@
-import { and, desc, eq, or } from 'drizzle-orm';
+import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import { db, hasDb } from '../db';
 import { auditLog } from '../db/schema';
 
@@ -32,7 +32,7 @@ export async function logEvent(e: EventInput): Promise<void> {
 		...(e.path ? { path: e.path } : {}),
 		...(e.status != null ? { status: e.status } : {}),
 		...(e.durationMs != null ? { ms: e.durationMs } : {}),
-		...(e.suspicious ? { suspicious: true } : {})
+		...(e.suspicious ? { suspicious: true } : {}),
 	};
 	console.log(`[event] ${JSON.stringify(line)}`);
 	if (!hasDb()) return;
@@ -51,10 +51,26 @@ export async function logEvent(e: EventInput): Promise<void> {
 				ip: e.ip ?? null,
 				userAgent: e.userAgent ?? null,
 				suspicious: e.suspicious ?? false,
-				detail: e.detail ?? null
+				detail: e.detail ?? null,
 			});
 	} catch {
 		/* logging must never break the request */
+	}
+}
+
+/** Delete events older than `days` (retention sweep, called by the warm job).
+ * Returns the number of rows removed. Best-effort: never throws. */
+export async function pruneEvents(days: number): Promise<number> {
+	if (!hasDb() || !Number.isFinite(days) || days <= 0) return 0;
+	try {
+		const cutoff = sql`now() - make_interval(days => ${Math.round(days)})`;
+		const rows = await db()
+			.delete(auditLog)
+			.where(lt(auditLog.ts, cutoff))
+			.returning({ id: auditLog.id });
+		return rows.length;
+	} catch {
+		return 0;
 	}
 }
 
@@ -80,7 +96,7 @@ export async function getEvents(f: EventFilter = {}) {
 export async function audit(
 	userSub: string,
 	action: string,
-	detail?: Record<string, unknown>
+	detail?: Record<string, unknown>,
 ): Promise<void> {
 	await logEvent({ userSub, kind: 'action', action, detail: detail ?? null });
 }

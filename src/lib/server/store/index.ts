@@ -21,10 +21,7 @@ import type {
 	FactBundle,
 } from '../github/types';
 
-const uniq = <T>(xs: T[]) => [...new Set(xs)];
 const repoSet = (repos: Repo[]) => new Set(repos.map((r) => `${r.owner}/${r.repo}`));
-const owners = (repos: Repo[]) => uniq(repos.map((r) => r.owner));
-const repoNames = (repos: Repo[]) => uniq(repos.map((r) => r.repo));
 // Postgres caps a statement at 65535 bind parameters, so inserts are batched.
 // Sizes leave headroom for each table's column count.
 const chunk = <T>(xs: T[], n: number): T[][] => {
@@ -35,8 +32,11 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
 // On-conflict updates copy from the row we tried to insert ("excluded").
 const sqlExcluded = (col: string) => sql.raw(`excluded.${col}`);
 
-// The owner/repo IN-list pair over-matches cross products (owner A × repo B),
-// so every read filters back down to the exact requested repo set.
+// Exact (owner, repo) pair predicate — an OR of per-repo ANDs, so the planner
+// matches only the requested repos instead of the owner×name cross product.
+const repoPairs = (t: { owner: any; repo: any }, repos: Repo[]) =>
+	or(...repos.map((r) => and(eq(t.owner, r.owner), eq(t.repo, r.repo))))!;
+// Belt-and-braces re-filter for callers that pass duplicate repo entries.
 const filterRepos = <T extends { owner: string; repo: string }>(rows: T[], repos: Repo[]): T[] => {
 	const want = repoSet(repos);
 	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
@@ -97,7 +97,13 @@ export async function upsertReviewFacts(rows: ReviewFact[]): Promise<void> {
 			.values(batch)
 			.onConflictDoUpdate({
 				target: [reviewFact.owner, reviewFact.repo, reviewFact.id],
-				set: { state: sqlExcluded('state'), ts: sqlExcluded('ts') },
+				set: {
+					state: sqlExcluded('state'),
+					isBot: sqlExcluded('is_bot'),
+					avatarUrl: sqlExcluded('avatar_url'),
+					commentsCount: sqlExcluded('comments_count'),
+					ts: sqlExcluded('ts'),
+				},
 			});
 	}
 }
@@ -135,10 +141,7 @@ export async function upsertStockDays(rows: StockDay[]): Promise<void> {
 
 export async function getRepoSyncRows(repos: Repo[]): Promise<RepoSyncRow[]> {
 	if (!repos.length) return [];
-	const rows = await db()
-		.select()
-		.from(repoSync)
-		.where(and(inArray(repoSync.owner, owners(repos)), inArray(repoSync.repo, repoNames(repos))));
+	const rows = await db().select().from(repoSync).where(repoPairs(repoSync, repos));
 	return filterRepos(rows, repos);
 }
 
@@ -151,6 +154,7 @@ export async function upsertRepoSync(row: Omit<RepoSyncRow, 'fetchedAt'>): Promi
 			set: {
 				backfilledFrom: sqlExcluded('backfilled_from'),
 				activityBackfilledFrom: sqlExcluded('activity_backfilled_from'),
+				reviewBackfilledFrom: sqlExcluded('review_backfilled_from'),
 				syncedThrough: sqlExcluded('synced_through'),
 				fetchedAt: sql`now()`,
 			},
@@ -182,8 +186,7 @@ export async function readFactBundle(
 			stocks: [],
 		};
 	}
-	const ownerIn = <T extends { owner: any; repo: any }>(t: T) =>
-		and(inArray(t.owner, owners(repos)), inArray(t.repo, repoNames(repos)));
+	const ownerIn = <T extends { owner: any; repo: any }>(t: T) => repoPairs(t, repos);
 
 	const [prs, issues, commits, reviews, releases, stocks] = await Promise.all([
 		db()
@@ -230,9 +233,13 @@ export async function readFactBundle(
 					lte(releaseFact.publishedAt, end),
 				),
 			),
-		// Stock snapshots are sparse (month ends + recent days); read them all for
-		// the repo set and pick per-bucket in the aggregator.
-		db().select().from(repoStockDay).where(ownerIn(repoStockDay)),
+		// Stock snapshots are sparse (month ends + recent days); read the span's
+		// worth for the repo set and pick per-bucket in the aggregator. The day
+		// bound keeps this from scanning years of daily snapshots as history grows.
+		db()
+			.select()
+			.from(repoStockDay)
+			.where(and(ownerIn(repoStockDay), gte(repoStockDay.day, start.toISOString().slice(0, 10)))),
 	]);
 
 	return {
@@ -243,4 +250,42 @@ export async function readFactBundle(
 		releases: filterRepos(releases, repos),
 		stocks: filterRepos(stocks, repos),
 	};
+}
+
+// --- flow facts (merged cohort + its review timeline) --------------------------
+
+/**
+ * The merged-PR cohort for a window plus every review event on those repos back
+ * to the cohort's earliest open time, so first-review/approval instants that
+ * precede the window are not lost. Two steps because the review lower bound
+ * depends on the cohort's oldest createdAt.
+ */
+export async function readFlowFacts(
+	repos: Repo[],
+	start: Date,
+	end: Date,
+): Promise<{ prs: PrFact[]; reviews: ReviewFact[] }> {
+	if (!repos.length) return { prs: [], reviews: [] };
+	const prs = filterRepos(
+		await db()
+			.select()
+			.from(prFact)
+			.where(and(repoPairs(prFact, repos), gte(prFact.mergedAt, start), lte(prFact.mergedAt, end))),
+		repos,
+	);
+	if (!prs.length) return { prs, reviews: [] };
+	const oldestOpen = prs.reduce(
+		(min, p) => (p.createdAt < min ? p.createdAt : min),
+		prs[0].createdAt,
+	);
+	const reviews = filterRepos(
+		await db()
+			.select()
+			.from(reviewFact)
+			.where(
+				and(repoPairs(reviewFact, repos), gte(reviewFact.ts, oldestOpen), lte(reviewFact.ts, end)),
+			),
+		repos,
+	) as ReviewFact[];
+	return { prs, reviews };
 }

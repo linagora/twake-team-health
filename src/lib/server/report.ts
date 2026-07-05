@@ -52,7 +52,10 @@ export function resolveReportShape(selection: Selection, now: Date): ReportShape
 	const endKey = historical ? selection.to! : current;
 	const extra = historical ? 0 : 1;
 	const months = monthsEndingAt(endKey, selection.months + extra);
-	const memberMonths = monthsEndingAt(endKey, Math.min(selection.memberMonths, selection.months) + extra);
+	const memberMonths = monthsEndingAt(
+		endKey,
+		Math.min(selection.memberMonths, selection.months) + extra,
+	);
 
 	const todayDay = dayOf(now);
 	const windowEndDay = historical ? monthEnd(months[months.length - 1]) : todayDay;
@@ -96,14 +99,15 @@ export async function getReport(
 			bugLabels,
 		);
 	} else {
+		// Reviews follow the member window here; the flow report widens the review
+		// watermark on demand. Tail refreshes run in the background (SWR) so an
+		// interactive report never blocks on GitHub for data it already has.
 		const sync = await ensureFactsSynced(
 			selection.repos,
 			shape.spanStartDay,
 			shape.activityStartDay,
-			{
-				bugLabels,
-				now,
-			},
+			shape.activityStartDay,
+			{ bugLabels, now, swr: true },
 			gql,
 		);
 		bundle = await store.readFactBundle(
@@ -123,7 +127,7 @@ export async function getReport(
 			);
 		}
 		console.info(
-			`[report] repos=${selection.repos.length} months=${shape.months.length} refreshed=${sync.refreshed}/${sync.synced}`,
+			`[report] repos=${selection.repos.length} months=${shape.months.length} refreshed=${sync.refreshed}/${sync.synced} background=${sync.backgrounded}`,
 		);
 	}
 
