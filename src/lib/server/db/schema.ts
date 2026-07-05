@@ -197,6 +197,13 @@ export const reviewFact = pgTable(
 		reviewer: text('reviewer').notNull(),
 		kind: text('kind').notNull(), // 'review' | 'comment'
 		state: text('state'), // review state (APPROVED, ...); null for comments
+		// Bot reviewers (CodeRabbit, CodeScene, ...) are excluded from human review
+		// latency and tallied on the Bots page instead; avatar_url renders there.
+		isBot: boolean('is_bot').notNull().default(false),
+		avatarUrl: text('avatar_url'),
+		// Inline comments attached to a review submission (the Bots page's
+		// comments-per-PR measure).
+		commentsCount: integer('comments_count').notNull().default(0),
 		ts: timestamp('ts', { withTimezone: true }).notNull(),
 	},
 	(t) => [
@@ -237,11 +244,13 @@ export const repoStockDay = pgTable(
 	(t) => [primaryKey({ columns: [t.owner, t.repo, t.day] })],
 );
 
-// Per-repo sync watermark. backfilled_from marks how far back facts exist
-// (activity_backfilled_from separately for the heavier commit/review facts, which
-// only need the member window); synced_through is the last day the recent tail
-// was refreshed through. The refresh refetches a couple of days of overlap, so a
-// PR that merged or an issue that closed since the last pass is picked up.
+// Per-repo sync watermark. backfilled_from marks how far back pr/issue/release
+// facts exist; activity_backfilled_from bounds the heavier commit facts (member
+// window only); review_backfilled_from bounds review facts (the flow window —
+// null on legacy rows means "same as activity"). synced_through is the last day
+// the recent tail was refreshed through; the refresh refetches a couple of days
+// of overlap, so a PR that merged or an issue that closed since the last pass is
+// picked up.
 export const repoSync = pgTable(
 	'repo_sync',
 	{
@@ -249,6 +258,7 @@ export const repoSync = pgTable(
 		repo: text('repo').notNull(),
 		backfilledFrom: text('backfilled_from').notNull(), // YYYY-MM-DD
 		activityBackfilledFrom: text('activity_backfilled_from').notNull(), // YYYY-MM-DD
+		reviewBackfilledFrom: text('review_backfilled_from'), // YYYY-MM-DD; null = activity_backfilled_from
 		syncedThrough: text('synced_through').notNull(), // YYYY-MM-DD
 		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
 	},

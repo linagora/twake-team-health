@@ -162,6 +162,11 @@ export type ReviewFact = {
 	reviewer: string;
 	kind: 'review' | 'comment';
 	state: string | null;
+	/** Automated reviewer (GitHub App/Bot author) — excluded from human latency. */
+	isBot: boolean;
+	avatarUrl: string | null;
+	/** Inline comments attached to a review submission. */
+	commentsCount: number;
 	ts: Date;
 };
 
@@ -186,6 +191,8 @@ export type RepoSyncRow = {
 	repo: string;
 	backfilledFrom: string; // YYYY-MM-DD
 	activityBackfilledFrom: string; // YYYY-MM-DD
+	/** How far back review facts exist; null (legacy row) = activityBackfilledFrom. */
+	reviewBackfilledFrom: string | null; // YYYY-MM-DD
 	syncedThrough: string; // YYYY-MM-DD
 	fetchedAt: Date;
 };
