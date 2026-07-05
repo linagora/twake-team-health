@@ -259,7 +259,7 @@
 		<section class="mb-14">
 			<div class="mb-6 flex items-baseline justify-between">
 				<div>
-					<div class="eyebrow mb-2">Most active repositories</div>
+					<div class="eyebrow mb-2">Most active repositories · last {scope.months}m</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h2>
 				</div>
 				<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
