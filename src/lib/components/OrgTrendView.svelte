@@ -83,6 +83,9 @@
 		<div>
 			<div class="eyebrow mb-2">Compare periods</div>
 			<h2 class="font-display text-[1.6rem] leading-none tracking-tight">Before vs. after</h2>
+			<p class="mt-2 text-xs text-[var(--color-ink-600)]">
+				Monthly averages over complete months only — the in-progress month is left out.
+			</p>
 		</div>
 		<div class="flex items-center gap-2 text-sm text-[var(--color-ink-600)]">
 			Split at

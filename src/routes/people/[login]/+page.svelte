@@ -81,7 +81,7 @@
 
 <svelte:head><title>{name} · team·health</title></svelte:head>
 
-<Topbar eyebrow="Profile" title={name} subtitle="{login} · {team?.name ?? 'team'} · last {scope.memberMonths} months">
+<Topbar eyebrow="Profile" title={name} subtitle="{login} · {team?.name ?? 'team'} · last {scope.memberMonths} months + this month">
 	{#snippet actions()}
 		<a href="/" class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-3 py-1.5 text-xs text-[var(--color-ink-800)] hover:border-[var(--color-ink-400)]">
 			<ArrowLeft class="h-3.5 w-3.5" /> Overview
