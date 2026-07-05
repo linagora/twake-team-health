@@ -4,11 +4,12 @@
 	import MiniAreaChart from '$lib/components/charts/MiniAreaChart.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { metrics } from '$lib/client/metrics.svelte';
+	import { metrics, forceRefresh, selectionFor } from '$lib/client/metrics.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
-	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
+	import { monthKeyOf } from '$lib/months';
+	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, RefreshCw, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { computeAwards } from '$lib/awards';
 
@@ -31,7 +32,12 @@
 		breadth: Compass
 	};
 
-	const totalMonthly = $derived.by(() => {
+	// The report's buckets run through today; the in-progress month is real data.
+	// `allMonthly` keeps it (bar chart renders it as a distinct month-to-date bar);
+	// `totalMonthly` drops it for the series where a partial point would mislead
+	// (sparklines, hero fallback and its month-over-month trends).
+	const currentMonthKey = monthKeyOf();
+	const allMonthly = $derived.by(() => {
 		const byMonth = new Map<string, { created: number; merged: number; bugs: number; issues: number }>();
 		for (const r of stats?.repos ?? []) {
 			const m = byMonth.get(r.month) ?? { created: 0, merged: 0, bugs: 0, issues: 0 };
@@ -43,6 +49,7 @@
 		}
 		return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});
+	const totalMonthly = $derived(allMonthly.filter(([month]) => month < currentMonthKey));
 
 	const totals = $derived.by(() => {
 		const empty = { created: 0, merged: 0, bugs: 0, issues: 0 };
@@ -69,6 +76,46 @@
 		};
 	});
 
+	// Hero headline: the rolling last-30-days window, aggregated server-side from
+	// facts. It always spans a full 30 days, so it never cliffs to ~0 on the 1st
+	// the way an in-progress calendar month does. Falls back to the last complete
+	// month's totals only when a (stale-cached) result predates the window field.
+	let refreshing = $state(false);
+	const win = $derived(stats?.window30d ?? null);
+	const hasWindow = $derived(!!win && win.computedAt !== null);
+
+	const hero = $derived.by(() => {
+		const trend = (cur: number, p: number) => (p === 0 ? 0 : ((cur - p) / p) * 100);
+		if (win && hasWindow) {
+			const c = win.current;
+			const p = win.previous;
+			return {
+				merged: c.merged,
+				created: c.created,
+				bugs: c.bugs,
+				trends: { merged: trend(c.merged, p.merged), created: trend(c.created, p.created), bugs: trend(c.bugs, p.bugs) }
+			};
+		}
+		return { merged: totals.last.merged, created: totals.last.created, bugs: totals.last.bugs, trends: totals.trends };
+	});
+	const heroPeriod = $derived(hasWindow ? 'last 30 days' : 'last month');
+	const heroHint = $derived(hasWindow ? 'vs. previous 30 days' : 'vs. previous month');
+
+	// Force-refetch the fact tail from GitHub, then reload through the (now fresh)
+	// metrics cache so every derived section updates together.
+	async function refreshNow() {
+		if (refreshing || !team) return;
+		refreshing = true;
+		try {
+			await forceRefresh(selectionFor(team, scope.months, scope.memberMonths, scope.to || undefined));
+			await metrics.load(selectionFor(team, scope.months, scope.memberMonths, scope.to || undefined));
+		} catch {
+			// Leave the current data in place; the refresh is best-effort.
+		} finally {
+			refreshing = false;
+		}
+	}
+
 	const mergedSpark = $derived(totalMonthly.map(([, v]) => v.merged));
 	const createdSpark = $derived(totalMonthly.map(([, v]) => v.created));
 	const bugSpark = $derived(totalMonthly.map(([, v]) => v.bugs));
@@ -92,30 +139,42 @@
 
 	// Every team member, with their commit count (0 if none), ranked — not capped.
 	const topAuthors = $derived.by(() => {
+		// Rolling last-30d activity, so the board never resets at a month boundary.
+		// Falls back to window sums only for a stale-cached result without the field.
+		const recent = new Map((stats?.recentMembers ?? []).map((r) => [r.login.toLowerCase(), r]));
 		const byAuthor = new Map<string, number>();
-		for (const a of stats?.authors ?? []) {
-			const k = a.author.toLowerCase();
-			byAuthor.set(k, (byAuthor.get(k) ?? 0) + a.commits);
+		if (recent.size === 0) {
+			for (const a of stats?.authors ?? []) {
+				const k = a.author.toLowerCase();
+				byAuthor.set(k, (byAuthor.get(k) ?? 0) + a.commits);
+			}
 		}
 		return (team?.members ?? [])
-			.map((m) => [m.login, byAuthor.get(m.login.toLowerCase()) ?? 0] as [string, number])
+			.map((m) => {
+				const k = m.login.toLowerCase();
+				const commits = recent.size ? (recent.get(k)?.commits ?? 0) : (byAuthor.get(k) ?? 0);
+				return [m.login, commits] as [string, number];
+			})
 			.sort((a, b) => b[1] - a[1]);
 	});
 
-	// Every team member's lines added/removed (merged PRs), ranked — not capped.
+	// Every team member's lines added/removed (merged PRs, last 30 days), ranked.
 	const topLines = $derived.by(() => {
+		const recent = new Map((stats?.recentMembers ?? []).map((r) => [r.login.toLowerCase(), r]));
 		const byLogin = new Map(
 			(stats?.linesByAuthor ?? []).map((l) => [l.author.toLowerCase(), l])
 		);
 		return (team?.members ?? [])
 			.map((m) => {
-				const l = byLogin.get(m.login.toLowerCase());
+				const l = recent.size ? recent.get(m.login.toLowerCase()) : byLogin.get(m.login.toLowerCase());
 				const additions = l?.additions ?? 0;
 				const deletions = l?.deletions ?? 0;
 				return { author: m.login, additions, deletions, total: additions + deletions };
 			})
 			.sort((a, b) => b.total - a.total);
 	});
+
+	const hasRecent = $derived((stats?.recentMembers ?? []).length > 0);
 
 	const lastRun = $derived(
 		stats?.generatedAt
@@ -131,6 +190,9 @@
 >
 	{#snippet actions()}
 		{#if stats}
+			<Button variant="outline" size="lg" onclick={refreshNow} disabled={refreshing} title="Refetch the latest data from GitHub now">
+				<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" /> Refresh
+			</Button>
 			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>
@@ -174,15 +236,15 @@
 		<!-- Hero stats -->
 		<section class="mb-14 grid grid-cols-12 gap-x-6 gap-y-8 sm:gap-x-8 sm:gap-y-10">
 			<div class="col-span-12 md:col-span-5">
-				<Stat label="PRs merged · last month" value={totals.last.merged} trend={totals.trends.merged} hint="vs. previous month" size="lg" />
+				<Stat label="PRs merged · {heroPeriod}" value={hero.merged} trend={hero.trends.merged} hint={heroHint} size="lg" />
 				<div class="mt-6"><MiniAreaChart values={mergedSpark} width={300} height={48} /></div>
 			</div>
 			<div class="col-span-6 md:col-span-3 md:border-l md:border-[var(--color-ink-300)] md:pl-8">
-				<Stat label="PRs opened" value={totals.last.created} trend={totals.trends.created} size="md" />
+				<Stat label="PRs opened" value={hero.created} trend={hero.trends.created} size="md" />
 				<div class="mt-5"><MiniAreaChart values={createdSpark} width={180} height={36} stroke="var(--color-info)" /></div>
 			</div>
 			<div class="col-span-6 md:col-span-2 md:border-l md:border-[var(--color-ink-300)] md:pl-8">
-				<Stat label="Bugs raised" value={totals.last.bugs} trend={totals.trends.bugs} size="md" />
+				<Stat label="Bugs raised" value={hero.bugs} trend={hero.trends.bugs} size="md" />
 				<div class="mt-5"><MiniAreaChart values={bugSpark} width={140} height={36} stroke="var(--color-negative)" /></div>
 			</div>
 			<div class="col-span-12 md:col-span-2 md:border-l md:border-[var(--color-ink-300)] md:pl-8">
@@ -197,7 +259,7 @@
 		<section class="mb-14">
 			<div class="mb-6 flex items-baseline justify-between">
 				<div>
-					<div class="eyebrow mb-2">Most active repositories</div>
+					<div class="eyebrow mb-2">Most active repositories · last {scope.months}m</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h2>
 				</div>
 				<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
@@ -227,7 +289,7 @@
 		<section class="grid grid-cols-1 gap-8 lg:grid-cols-2">
 			<div>
 				<div class="mb-6">
-					<div class="eyebrow mb-2">Commit leaderboard · last {scope.memberMonths}m</div>
+					<div class="eyebrow mb-2">Commit leaderboard · {hasRecent ? 'last 30 days' : `last ${scope.memberMonths}m`}</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Who's pushing the code</h2>
 				</div>
 				<Card.Root class="p-6 shadow-sm">
@@ -257,7 +319,7 @@
 
 			<div>
 				<div class="mb-6">
-					<div class="eyebrow mb-2">Lines of code · merged PRs · last {scope.memberMonths}m</div>
+					<div class="eyebrow mb-2">Lines of code · merged PRs · {hasRecent ? 'last 30 days' : `last ${scope.memberMonths}m`}</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Who's changing the most</h2>
 				</div>
 				<Card.Root class="p-6 shadow-sm">
@@ -328,28 +390,38 @@
 		{/if}
 
 		<!-- Cadence -->
-		{#if totalMonthly.length > 0}
-			{@const maxBar = Math.max(...totalMonthly.map(([, v]) => v.merged), 1)}
+		{#if allMonthly.length > 0}
+			{@const maxBar = Math.max(...allMonthly.map(([, v]) => v.merged), 1)}
 			<section class="mt-16">
 				<div class="mb-6">
 					<div class="eyebrow mb-2">Pull requests merged · per month</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Merged PRs, month by month</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
 						Each bar is the number of pull requests the team merged that month — taller means more shipped.
+						The dimmed last bar is the current month so far.
 					</p>
 				</div>
 				<Card.Root class="p-8 shadow-sm">
 					<div class="flex items-end justify-between gap-2 h-52 border-b border-[var(--color-ink-200)]">
-						{#each totalMonthly as [month, v] (month)}
-							<div class="flex-1 flex flex-col items-center gap-1.5 group cursor-default">
-								<div class="font-mono tabular text-[11px] text-[var(--color-ink-700)] group-hover:text-[var(--color-ink-950)]">{v.merged}</div>
-								<div class="w-full bg-[var(--color-brand)]/80 rounded-t-sm transition-all group-hover:bg-[var(--color-brand)]" style:height={`${Math.max((v.merged / maxBar) * 150, 2)}px`}></div>
+						{#each allMonthly as [month, v] (month)}
+							{@const mtd = month === currentMonthKey}
+							<div class="flex-1 flex flex-col items-center gap-1.5 group cursor-default" title={mtd ? `${fmtMonth(month)} — month to date` : fmtMonth(month)}>
+								<div class="font-mono tabular text-[11px] {mtd ? 'text-[var(--color-ink-500)]' : 'text-[var(--color-ink-700)]'} group-hover:text-[var(--color-ink-950)]">{v.merged}</div>
+								<div
+									class="w-full rounded-t-sm transition-all {mtd
+										? 'bg-[var(--color-brand)]/30 border border-b-0 border-dashed border-[var(--color-brand)]/60 group-hover:bg-[var(--color-brand)]/40'
+										: 'bg-[var(--color-brand)]/80 group-hover:bg-[var(--color-brand)]'}"
+									style:height={`${Math.max((v.merged / maxBar) * 150, 2)}px`}
+								></div>
 							</div>
 						{/each}
 					</div>
 					<div class="flex justify-between gap-2 pt-2">
-						{#each totalMonthly as [month] (month)}
-							<div class="flex-1 text-center text-[10px] font-mono uppercase tracking-wider text-[var(--color-ink-600)]">{fmtMonth(month)}</div>
+						{#each allMonthly as [month] (month)}
+							{@const mtd = month === currentMonthKey}
+							<div class="flex-1 text-center text-[10px] font-mono uppercase tracking-wider {mtd ? 'text-[var(--color-ink-500)]' : 'text-[var(--color-ink-600)]'}">
+								{fmtMonth(month)}{#if mtd}<span class="block text-[8px] tracking-widest text-[var(--color-brand)]">MTD</span>{/if}
+							</div>
 						{/each}
 					</div>
 				</Card.Root>

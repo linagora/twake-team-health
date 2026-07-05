@@ -1,263 +1,154 @@
-// Report orchestrator. Every (repo, month) is persisted and reused across teams.
-// A month is refetched from GitHub only when its stored row is stale:
-//   - completed month: stale until it has been fetched AFTER the month ended
-//     (so a month first stored while in-progress gets one finalizing pull, then
-//     is frozen forever).
-//   - current month: stale once older than CURRENT_MONTH_TTL_MS.
-// With no DATABASE_URL it falls back to fetching everything live every time.
-import { env } from '$env/dynamic/private';
+// Report orchestrator over the fact store. Facts are synced per repo (watermark
+// model, see sync.ts), read once, and aggregated at read time into:
+//   - calendar-month buckets covering the full requested window THROUGH TODAY
+//     (the in-progress month is an extra bucket; charts drop it at render time
+//     via completeMonths so they never show a stub bar, while sums, signals and
+//     leaderboards keep it so nothing is cut off at a month boundary),
+//   - rolling trailing-30d headline + per-member numbers (window30d /
+//     recentMembers), which always span a full 30 days.
+// With no DATABASE_URL it falls back to fetching facts live on every request.
 import { graphql, type GraphQL } from './github/client';
-import { lastNMonths, monthsEndingAt, monthKey, monthEndMs, type Month } from './github/months';
-import {
-	fetchRepoMonthRows,
-	fetchMemberRepoMonthRows,
-	fetchReviewRepoMonthRows
-} from './github/metrics';
-import { assembleMetrics, type MemberRepoMonthRow, type ReviewRepoMonthRow } from './store/assemble';
+import { monthsEndingAt, monthEnd, type Month } from './github/months';
+import { makeBugMatcher } from './github/stats';
+import { assembleMetrics } from './store/assemble';
+import { buildStoredRows, aggregateRecent } from './store/aggregate';
 import { excludeReleases, globalNoReleaseRepos } from './release-exclusions';
 import * as store from './store';
+import { ensureFactsSynced, fetchFactBundleLive } from './sync';
 import { hasDb } from './db';
 import { getAppSettings } from './app-config';
-import type { Selection, MetricsResult, RepoMonth, Repo, Member } from './github/types';
+import { dayOf, dayStartMs, addDays, WINDOW_DAYS } from './days';
+import { monthKeyOf } from '$lib/months';
+import type { Selection, MetricsResult, FactBundle } from './github/types';
 
-const rk = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`;
+export type ReportShape = {
+	/** Repo-series buckets, ascending: N complete months + the in-progress month
+	 * on rolling selections (charts drop the partial bucket client-side). */
+	months: Month[];
+	/** Member/review-series buckets, ascending (same rule). */
+	memberMonths: Month[];
+	/** Rolling windows end here (today, or the historical `to` month's end). */
+	windowEndDay: string;
+	/** Oldest day pr/issue/release facts must cover. */
+	spanStartDay: string;
+	/** Oldest day commit/review facts must cover. */
+	activityStartDay: string;
+};
 
-// How long the in-progress month's data is trusted before a refresh. Completed
-// months never expire (their freshness floor is the end of the month). A valid
-// 0 means "always refetch the current month", so don't fall through on falsy-0.
-const ttlEnv = Number(env.CURRENT_MONTH_TTL_MS);
-const CURRENT_TTL_MS = Number.isFinite(ttlEnv) && ttlEnv >= 0 ? ttlEnv : 6 * 60 * 60 * 1000;
+/**
+ * Pure: resolve a selection into complete-month buckets and fact-span bounds.
+ * The window always ends at the last COMPLETE month (or the explicit `to`), so
+ * no bucket is ever the in-progress month; the rolling windows end at today
+ * (rolling selection) or at the historical month's end.
+ */
+export function resolveReportShape(selection: Selection, now: Date): ReportShape {
+	const current = monthKeyOf(now);
+	const historical = selection.to !== undefined && selection.to < current;
+	// Rolling selections bucket the requested N COMPLETE months PLUS the
+	// in-progress month as an extra bucket: sums, signals, and leaderboards see
+	// data through today, while charts drop the partial bucket at render time
+	// (completeMonths), so no surface is cut off and no chart shows a stub bar.
+	// An explicit historical `to` is honored as-is (all its months are complete).
+	const endKey = historical ? selection.to! : current;
+	const extra = historical ? 0 : 1;
+	const months = monthsEndingAt(endKey, selection.months + extra);
+	const memberMonths = monthsEndingAt(endKey, Math.min(selection.memberMonths, selection.months) + extra);
 
-// A stored row for month `m` is authoritative only if it was fetched after this
-// instant. Completed months: after the month ended. Current month: within TTL.
-export function freshnessFloor(m: Month, currentKey: string, nowMs: number): number {
-	return monthKey(m) === currentKey ? nowMs - CURRENT_TTL_MS : monthEndMs(m);
+	const todayDay = dayOf(now);
+	const windowEndDay = historical ? monthEnd(months[months.length - 1]) : todayDay;
+	// The previous rolling window reaches 2N-1 days back from its end.
+	const windowStartDay = addDays(windowEndDay, -(2 * WINDOW_DAYS - 1));
+
+	const monthsStart = `${months[0].year}-${String(months[0].month).padStart(2, '0')}-01`;
+	const memberStart = `${memberMonths[0].year}-${String(memberMonths[0].month).padStart(2, '0')}-01`;
+	return {
+		months,
+		memberMonths,
+		windowEndDay,
+		spanStartDay: windowStartDay < monthsStart ? windowStartDay : monthsStart,
+		activityStartDay: windowStartDay < memberStart ? windowStartDay : memberStart,
+	};
 }
 
-/** The months that must be (re)fetched from GitHub: any month where some required
- * key is missing from the store or was fetched at/before its freshness floor.
- * `requiredKeys(m)` lists every store key that must be fresh for month `m` to be
- * served from cache (one per repo, or per member×repo). */
-export function monthsToFetch(
-	months: Month[],
-	requiredKeys: (m: Month) => string[],
-	fetchedAt: Map<string, Date>,
-	currentKey: string,
-	nowMs: number
-): Month[] {
-	return months.filter((m) => {
-		const floor = freshnessFloor(m, currentKey, nowMs);
-		return !requiredKeys(m).every((k) => {
-			const f = fetchedAt.get(k);
-			return f !== undefined && f.getTime() > floor;
-		});
-	});
-}
-
+/** Build the full report for a selection (cached upstream by metrics-cache). */
 export async function getReport(
 	selection: Selection,
 	now: Date = new Date(),
-	gql: GraphQL = graphql
+	gql: GraphQL = graphql,
 ): Promise<MetricsResult> {
-	const memberCount = Math.min(selection.memberMonths, selection.months);
-	// An explicit `to` ends the window at that month; otherwise it rolls with now.
-	const months = selection.to
-		? monthsEndingAt(selection.to, selection.months)
-		: lastNMonths(selection.months, now);
-	const memberMonths = selection.to
-		? monthsEndingAt(selection.to, memberCount)
-		: lastNMonths(memberCount, now);
-	const currentKey = monthKey({ year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 });
-	const nowMs = now.getTime();
-	// Repos whose releases are excluded from the stats (global ignore-list + the
-	// selection's own per-repo flags); applied to the rows before aggregation.
-	const noReleases = globalNoReleaseRepos();
+	const shape = resolveReportShape(selection, now);
+	const { bugLabels } = await getAppSettings();
+	const isBug = makeBugMatcher(bugLabels);
+	const todayDay = dayOf(now);
 
+	let bundle: FactBundle;
 	if (!hasDb()) {
 		console.warn(
-			'[report] DATABASE_URL is not set: fetching everything live with no persistence. ' +
-				'Set DATABASE_URL so completed months are cached and the GitHub token is not rate limited.'
+			'[report] DATABASE_URL is not set: fetching all facts live with no persistence. ' +
+				'Set DATABASE_URL so facts are stored once and refreshed incrementally.',
 		);
-		// Use the configured bug labels here too; without this the no-DB path classifies
-		// zero bugs while the DB path (which passes bugLabels) classifies correctly.
-		const { bugLabels } = await getAppSettings();
-		const [repoRows, memberRows, reviewRows] = await Promise.all([
-			fetchRepoMonthRows(gql, selection.repos, months, bugLabels),
-			fetchMemberRepoMonthRows(gql, selection.repos, selection.members, memberMonths),
-			fetchReviewRepoMonthRows(gql, selection.repos, memberMonths)
-		]);
-		return assembleMetrics(
-			{ repoRows: excludeReleases(repoRows, selection.repos, noReleases), memberRows, reviewRows },
-			selection.members,
-			nowMs
+		bundle = await fetchFactBundleLive(
+			gql,
+			selection.repos,
+			shape.spanStartDay,
+			shape.activityStartDay,
+			todayDay,
+			bugLabels,
+		);
+	} else {
+		const sync = await ensureFactsSynced(
+			selection.repos,
+			shape.spanStartDay,
+			shape.activityStartDay,
+			{
+				bugLabels,
+				now,
+			},
+			gql,
+		);
+		bundle = await store.readFactBundle(
+			selection.repos,
+			new Date(dayStartMs(shape.spanStartDay)),
+			new Date(dayStartMs(shape.activityStartDay)),
+			now,
+		);
+		if (sync.failed.length) {
+			// Partial sync: serve what is stored — unless there is nothing at all to
+			// serve, in which case surface the fetch error (rate limit etc.).
+			if (!bundle.prs.length && !bundle.issues.length && !bundle.commits.length) {
+				throw sync.failed[0].error;
+			}
+			console.warn(
+				`[report] sync partial (${sync.failed.length}/${selection.repos.length} repos failed), serving stored facts: ${sync.failed[0].error.message}`,
+			);
+		}
+		console.info(
+			`[report] repos=${selection.repos.length} months=${shape.months.length} refreshed=${sync.refreshed}/${sync.synced}`,
 		);
 	}
 
-	const [repoRes, memberRes] = await Promise.all([
-		resolveRepoAndReview(gql, selection.repos, months, currentKey, nowMs),
-		resolveMembers(gql, selection.repos, selection.members, memberMonths, currentKey, nowMs)
-	]);
-	// If a refresh failed and the store had nothing to fall back on, there's no
-	// report to serve — surface the error (rate limit, etc.) instead of a blank one.
-	if (!repoRes.repoRows.length && repoRes.fetchError) throw repoRes.fetchError;
-
-	// Reviews are member activity, so scope them to the member window — matching the
-	// no-DB path (which fetches reviews for memberMonths only).
-	const memberMonthKeys = new Set(memberMonths.map(monthKey));
-	const scopedReviews = repoRes.reviewRows.filter((r) => memberMonthKeys.has(r.month));
-
-	console.info(
-		`[report] repos=${selection.repos.length} months=${selection.months} ` +
-			`repoMonthsFetched=${repoRes.fetched}/${months.length} ` +
-			`memberMonthsFetched=${memberRes.fetched}/${memberMonths.length}`
-	);
-	return assembleMetrics(
+	const rows = buildStoredRows(bundle, {
+		repos: selection.repos,
+		members: selection.members,
+		months: shape.months,
+		memberMonths: shape.memberMonths,
+		isBug,
+	});
+	const metrics = assembleMetrics(
 		{
-			repoRows: excludeReleases(repoRes.repoRows, selection.repos, noReleases),
-			memberRows: memberRes.rows,
-			reviewRows: scopedReviews
+			...rows,
+			repoRows: excludeReleases(rows.repoRows, selection.repos, globalNoReleaseRepos()),
 		},
 		selection.members,
-		nowMs
+		now.getTime(),
 	);
-}
-
-// repo_month + review_repo_month: fetch only the stale months, persist, then read
-// the full window back from the store.
-async function resolveRepoAndReview(
-	gql: GraphQL,
-	repos: Repo[],
-	months: Month[],
-	currentKey: string,
-	nowMs: number
-): Promise<{
-	repoRows: RepoMonth[];
-	reviewRows: ReviewRepoMonthRow[];
-	fetched: number;
-	fetchError?: unknown;
-}> {
-	const keys = months.map(monthKey);
-	// One read returns the rows and the fetched_at map that drives staleness, in
-	// parallel with reviews — no separate fetched_at query.
-	let [repoRead, reviewRows] = await Promise.all([
-		store.getRepoMonthsWithFetchedAt(repos, keys),
-		store.getReviewRepoMonths(repos, keys)
-	]);
-	const stale = monthsToFetch(
-		months,
-		(m) => repos.map((r) => `${rk(r)}::${monthKey(m)}`),
-		repoRead.fetchedAt,
-		currentKey,
-		nowMs
+	const recent = aggregateRecent(
+		bundle,
+		selection.repos,
+		selection.members,
+		isBug,
+		shape.windowEndDay,
+		now.getTime(),
 	);
-
-	let fetchError: unknown;
-	if (stale.length) {
-		const { bugLabels } = await getAppSettings();
-		// Fetch + persist per repo so a mid-refresh failure (e.g. a rate limit) keeps
-		// the repos that already completed; the next pass retries only the rest,
-		// instead of an all-or-nothing batch that loses everything on one blip.
-		const results = await Promise.allSettled(
-			repos.map(async (repo) => {
-				const [repoRows, reviewRowsNew] = await Promise.all([
-					fetchRepoMonthRows(gql, [repo], stale, bugLabels),
-					fetchReviewRepoMonthRows(gql, [repo], stale)
-				]);
-				await Promise.all([
-					store.upsertRepoMonths(repoRows),
-					store.upsertReviewRepoMonths(reviewRowsNew)
-				]);
-			})
-		);
-		const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
-		if (failed) {
-			// Some repos failed; the report still serves what persisted (stored rows).
-			fetchError = failed.reason;
-			console.warn(`[report] repo refresh partial, serving stored data: ${(failed.reason as Error).message}`);
-		}
-		// Re-read only after a refresh; the warm path uses the rows already read.
-		[repoRead, reviewRows] = await Promise.all([
-			store.getRepoMonthsWithFetchedAt(repos, keys),
-			store.getReviewRepoMonths(repos, keys)
-		]);
-	}
-
-	return { repoRows: repoRead.rows, reviewRows, fetched: stale.length, fetchError };
-}
-
-// member_repo_month: same staleness rule, per (member, repo, month). Zeros are
-// stored too (fillMemberGrid) so presence + fetched_at mark a month as resolved.
-async function resolveMembers(
-	gql: GraphQL,
-	repos: Repo[],
-	members: Member[],
-	months: Month[],
-	currentKey: string,
-	nowMs: number
-): Promise<{ rows: MemberRepoMonthRow[]; fetched: number }> {
-	if (!members.length) return { rows: [], fetched: 0 };
-	const keys = months.map(monthKey);
-	const logins = members.map((m) => m.login);
-	let { rows, fetchedAt } = await store.getMemberRepoMonthsWithFetchedAt(logins, repos, keys);
-	const stale = monthsToFetch(
-		months,
-		(m) => members.flatMap((mem) => repos.map((r) => `${mem.login}::${rk(r)}::${monthKey(m)}`)),
-		fetchedAt,
-		currentKey,
-		nowMs
-	);
-
-	if (stale.length) {
-		// Per-repo fetch + persist so a partial failure keeps the repos that finished.
-		const results = await Promise.allSettled(
-			repos.map(async (repo) => {
-				const fetched = await fetchMemberRepoMonthRows(gql, [repo], members, stale);
-				await store.upsertMemberRepoMonths(fillMemberGrid(members, [repo], stale, fetched));
-			})
-		);
-		const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
-		if (failed) {
-			// Member stats are non-essential; never let a failed refresh sink the report.
-			console.warn(`[report] member refresh partial, serving stored data: ${(failed.reason as Error).message}`);
-		}
-		// Re-read only after a refresh; the warm path uses the rows already read.
-		rows = (await store.getMemberRepoMonthsWithFetchedAt(logins, repos, keys)).rows;
-	}
-
-	return { rows, fetched: stale.length };
-}
-
-// Expand fetched (non-zero) member rows to a full grid so every (member, repo,
-// month) gets a stored row — that zero row + its fetched_at marks the month resolved.
-function fillMemberGrid(
-	members: Member[],
-	repos: Repo[],
-	months: Month[],
-	fetched: MemberRepoMonthRow[]
-): MemberRepoMonthRow[] {
-	const byKey = new Map(fetched.map((r) => [`${r.login}::${rk(r)}::${r.month}`, r]));
-	const out: MemberRepoMonthRow[] = [];
-	for (const mem of members) {
-		for (const r of repos) {
-			for (const m of months) {
-				const key = `${mem.login}::${rk(r)}::${monthKey(m)}`;
-				out.push(
-					byKey.get(key) ?? {
-						login: mem.login,
-						owner: r.owner,
-						repo: r.repo,
-						month: monthKey(m),
-						commits: 0,
-						weekendCommits: 0,
-						lateNightCommits: 0,
-						activeWeeks: [],
-						mergedPrs: 0,
-						additions: 0,
-						deletions: 0
-					}
-				);
-			}
-		}
-	}
-	return out;
+	return { ...metrics, ...recent };
 }

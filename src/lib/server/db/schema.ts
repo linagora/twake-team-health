@@ -8,16 +8,16 @@ import {
 	timestamp,
 	boolean,
 	primaryKey,
-	index
+	index,
 } from 'drizzle-orm/pg-core';
 import type { Member, Repo } from '../github/types';
 
 // ---------------------------------------------------------------------------
-// Composable monthly report store. Each row is a fact for one (entity, month),
-// reused by every team. A completed month is written once and never refetched.
-// The current (in-progress) month is also stored, with `fetched_at` recording
-// when it was last pulled from GitHub; it is refreshed only once it goes stale
-// (CURRENT_MONTH_TTL_MS), so the shared token isn't hit on every request.
+// LEGACY monthly report store, superseded by the fact store below (reports now
+// aggregate facts at read time, so any window works and nothing keys off the
+// in-progress calendar month). The tables are kept for rollback; no code reads
+// or writes them anymore. Dropped in a follow-up once the fact store has proven
+// itself in staging.
 // ---------------------------------------------------------------------------
 
 export const repoMonth = pgTable(
@@ -44,9 +44,9 @@ export const repoMonth = pgTable(
 		releases: integer('releases').notNull(),
 		resolutionDays: doublePrecision('resolution_days').notNull(),
 		resolutionRate: doublePrecision('resolution_rate').notNull(),
-		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [primaryKey({ columns: [t.owner, t.repo, t.month] })]
+	(t) => [primaryKey({ columns: [t.owner, t.repo, t.month] })],
 );
 
 export const memberRepoMonth = pgTable(
@@ -68,9 +68,9 @@ export const memberRepoMonth = pgTable(
 		mergedPrs: integer('merged_prs').notNull(),
 		additions: integer('additions').notNull().default(0),
 		deletions: integer('deletions').notNull().default(0),
-		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [primaryKey({ columns: [t.login, t.owner, t.repo, t.month] })]
+	(t) => [primaryKey({ columns: [t.login, t.owner, t.repo, t.month] })],
 );
 
 export const reviewRepoMonth = pgTable(
@@ -82,14 +82,14 @@ export const reviewRepoMonth = pgTable(
 		month: text('month').notNull(),
 		reviews: integer('reviews').notNull(),
 		comments: integer('comments').notNull(),
-		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull()
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
 	},
 	// Reads filter by (owner, repo, month) with no reviewer predicate, so the
 	// reviewer-leading PK can't serve them; this index avoids a full table scan.
 	(t) => [
 		primaryKey({ columns: [t.reviewer, t.owner, t.repo, t.month] }),
-		index('review_repo_month_lookup_idx').on(t.owner, t.repo, t.month)
-	]
+		index('review_repo_month_lookup_idx').on(t.owner, t.repo, t.month),
+	],
 );
 
 // Daily history of computed signal levels, so a point-in-time check (burnout,
@@ -104,13 +104,155 @@ export const signalSnapshot = pgTable(
 		day: text('day').notNull(), // YYYY-MM-DD (UTC)
 		level: text('level').notNull(), // 'ok' | 'warn' | 'bad'
 		value: text('value').notNull(), // display value, e.g. '88%'
-		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull()
+		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull(),
 	},
 	(t) => [
 		primaryKey({ columns: [t.scope, t.signalId, t.day] }),
 		// The page reads a scope's whole recent history; index that lookup.
-		index('signal_snapshot_lookup_idx').on(t.scope, t.day)
-	]
+		index('signal_snapshot_lookup_idx').on(t.scope, t.day),
+	],
+);
+
+// ---------------------------------------------------------------------------
+// Fact store: raw GitHub events at their native grain, so ANY window (a rolling
+// 30 days, a calendar month, a quarter) aggregates exactly at read time and no
+// surface has to key off the in-progress calendar month. Facts store what GitHub
+// said, not what we concluded from it: labels stay raw (the bug matcher runs at
+// read), commit timestamps keep their original offset (timezone classification
+// runs at read), so config/roster/timezone changes are retroactive without a
+// refetch. Sync state lives in repo_sync (a per-repo watermark), replacing the
+// per-month staleness model.
+// ---------------------------------------------------------------------------
+
+export const prFact = pgTable(
+	'pr_fact',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		number: integer('number').notNull(),
+		author: text('author'), // GitHub login; null when the account is gone
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+		mergedAt: timestamp('merged_at', { withTimezone: true }),
+		closedAt: timestamp('closed_at', { withTimezone: true }),
+		additions: integer('additions').notNull().default(0),
+		deletions: integer('deletions').notNull().default(0),
+		comments: integer('comments').notNull().default(0),
+		reviews: integer('reviews').notNull().default(0),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.owner, t.repo, t.number] }),
+		// Window reads filter on merged/created instants across a repo set.
+		index('pr_fact_merged_idx').on(t.owner, t.repo, t.mergedAt),
+		index('pr_fact_created_idx').on(t.owner, t.repo, t.createdAt),
+	],
+);
+
+export const issueFact = pgTable(
+	'issue_fact',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		number: integer('number').notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+		closedAt: timestamp('closed_at', { withTimezone: true }),
+		// Raw label names; the (configurable) bug matcher classifies at read time.
+		labels: jsonb('labels').$type<string[]>().notNull().default([]),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.owner, t.repo, t.number] }),
+		index('issue_fact_created_idx').on(t.owner, t.repo, t.createdAt),
+	],
+);
+
+export const commitFact = pgTable(
+	'commit_fact',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		oid: text('oid').notNull(),
+		authorLogin: text('author_login'), // linked GitHub identity, when any
+		authorEmail: text('author_email'), // fallback attribution key
+		// Raw ISO timestamp preserving the author's UTC offset — required for the
+		// local-time burnout classification; committed_at is the same instant
+		// normalized for range queries.
+		committedDate: text('committed_date').notNull(),
+		committedAt: timestamp('committed_at', { withTimezone: true }).notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.owner, t.repo, t.oid] }),
+		index('commit_fact_at_idx').on(t.owner, t.repo, t.committedAt),
+	],
+);
+
+export const reviewFact = pgTable(
+	'review_fact',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		id: text('id').notNull(), // GraphQL node id of the review / comment
+		prNumber: integer('pr_number').notNull(),
+		prAuthor: text('pr_author'), // for self-review exclusion at read time
+		reviewer: text('reviewer').notNull(),
+		kind: text('kind').notNull(), // 'review' | 'comment'
+		state: text('state'), // review state (APPROVED, ...); null for comments
+		ts: timestamp('ts', { withTimezone: true }).notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.owner, t.repo, t.id] }),
+		index('review_fact_ts_idx').on(t.owner, t.repo, t.ts),
+	],
+);
+
+export const releaseFact = pgTable(
+	'release_fact',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		tag: text('tag').notNull(),
+		publishedAt: timestamp('published_at', { withTimezone: true }).notNull(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.owner, t.repo, t.tag] }),
+		index('release_fact_at_idx').on(t.owner, t.repo, t.publishedAt),
+	],
+);
+
+// Open-stock (open PRs / issues / bugs) cannot be derived from a bounded fact
+// backfill — an issue opened years ago may still be open. Snapshot the cheap
+// cumulative counts as-of each month end (during backfill) and daily thereafter;
+// a month bucket reads the latest snapshot at or before its end.
+export const repoStockDay = pgTable(
+	'repo_stock_day',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		day: text('day').notNull(), // YYYY-MM-DD (UTC), the as-of date
+		issuesOpen: integer('issues_open').notNull(),
+		bugsOpen: integer('bugs_open').notNull(),
+		prsOpen: integer('prs_open').notNull(),
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.owner, t.repo, t.day] })],
+);
+
+// Per-repo sync watermark. backfilled_from marks how far back facts exist
+// (activity_backfilled_from separately for the heavier commit/review facts, which
+// only need the member window); synced_through is the last day the recent tail
+// was refreshed through. The refresh refetches a couple of days of overlap, so a
+// PR that merged or an issue that closed since the last pass is picked up.
+export const repoSync = pgTable(
+	'repo_sync',
+	{
+		owner: text('owner').notNull(),
+		repo: text('repo').notNull(),
+		backfilledFrom: text('backfilled_from').notNull(), // YYYY-MM-DD
+		activityBackfilledFrom: text('activity_backfilled_from').notNull(), // YYYY-MM-DD
+		syncedThrough: text('synced_through').notNull(), // YYYY-MM-DD
+		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.owner, t.repo] })],
 );
 
 // ---------------------------------------------------------------------------
@@ -129,9 +271,9 @@ export const team = pgTable(
 		// burnout/recovery local-time classification. Null = use each commit's offset.
 		tz: text('tz'),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [index('team_owner_idx').on(t.ownerSub)]
+	(t) => [index('team_owner_idx').on(t.ownerSub)],
 );
 
 // Singleton app-wide configuration overrides (admin-editable). Each key that is
@@ -140,7 +282,7 @@ export const team = pgTable(
 export const appConfig = pgTable('app_config', {
 	id: text('id').primaryKey(), // always 'app'
 	value: jsonb('value').$type<Record<string, unknown>>().notNull(),
-	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Wide per-user event log: one row per request (kind 'http'), per semantic action
@@ -162,12 +304,12 @@ export const auditLog = pgTable(
 		userAgent: text('user_agent'),
 		suspicious: boolean('suspicious').notNull().default(false),
 		detail: jsonb('detail').$type<Record<string, unknown>>(),
-		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull()
+		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull(),
 	},
 	(t) => [
 		index('audit_user_idx').on(t.userSub),
 		index('audit_ts_idx').on(t.ts),
 		index('audit_kind_idx').on(t.kind),
-		index('audit_suspicious_idx').on(t.suspicious)
-	]
+		index('audit_suspicious_idx').on(t.suspicious),
+	],
 );

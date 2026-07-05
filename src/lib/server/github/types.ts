@@ -5,7 +5,12 @@ export type Repo = {
 	 * that publish a release per package). Omitted = releases counted normally. */
 	noReleases?: boolean;
 };
-export type Member = { login: string; name: string; email?: string; tz?: string };
+export type Member = {
+	login: string;
+	name: string;
+	email?: string;
+	tz?: string;
+};
 
 /** One repository's metrics for one month. Mirrors the old RepoMonth shape so the
  * existing chart transforms keep working, plus the derived stock/release/resolution. */
@@ -34,13 +39,29 @@ export type RepoMonth = {
 };
 
 export type AuthorMonth = { author: string; month: string; commits: number };
-export type MergedAuthorMonth = { author: string; month: string; mergedPRs: number };
-export type ReviewActivity = { author: string; reviews: number; comments: number };
+export type MergedAuthorMonth = {
+	author: string;
+	month: string;
+	mergedPRs: number;
+};
+export type ReviewActivity = {
+	author: string;
+	reviews: number;
+	comments: number;
+};
 export type IssueMonth = { month: string; tickets: number; bugs: number };
 /** New metric: commits by a member, broken down per repository, over the window. */
-export type AuthorRepoCommits = { author: string; repo: string; commits: number };
+export type AuthorRepoCommits = {
+	author: string;
+	repo: string;
+	commits: number;
+};
 /** Lines added/removed by a member's merged PRs, over the window. */
-export type AuthorLines = { author: string; additions: number; deletions: number };
+export type AuthorLines = {
+	author: string;
+	additions: number;
+	deletions: number;
+};
 /** When a member commits, over the window: total vs. the weekend / late-night
  * (local-time) shares that feed burnout detection. */
 export type WorkPattern = {
@@ -52,6 +73,36 @@ export type WorkPattern = {
 	activeWeeks: number[];
 };
 
+/** Headline counts over a rolling window (last N days). Same four measures the
+ * overview hero shows, so it can read a full 30-day span instead of the
+ * in-progress calendar month (which reads ~0 on the 1st). */
+export type WindowCounts = {
+	created: number;
+	merged: number;
+	bugs: number;
+	issues: number;
+};
+
+/** The rolling-30d headline: the current window and the window before it (for
+ * the trend). `computedAt` is when the underlying facts were aggregated. */
+export type Window30d = {
+	current: WindowCounts;
+	previous: WindowCounts;
+	computedAt: number | null;
+};
+
+/** One member's activity over the trailing 30 days, for leaderboards/KPIs that
+ * must never collapse at a month boundary. */
+export type RecentMember = {
+	login: string;
+	commits: number;
+	mergedPrs: number;
+	additions: number;
+	deletions: number;
+	reviews: number;
+	comments: number;
+};
+
 export type MetricsResult = {
 	repos: RepoMonth[];
 	authors: AuthorMonth[];
@@ -61,7 +112,92 @@ export type MetricsResult = {
 	commitsByAuthorRepo: AuthorRepoCommits[];
 	linesByAuthor: AuthorLines[];
 	workPattern: WorkPattern[];
+	/** Rolling last-30-days headline (aggregated from facts at read time). */
+	window30d?: Window30d;
+	/** Per-member trailing-30d activity for leaderboards. */
+	recentMembers?: RecentMember[];
 	generatedAt: number;
+};
+
+// ---- Fact store rows (raw GitHub events; see db/schema.ts for rationale) ----
+export type PrFact = {
+	owner: string;
+	repo: string;
+	number: number;
+	author: string | null;
+	createdAt: Date;
+	mergedAt: Date | null;
+	closedAt: Date | null;
+	additions: number;
+	deletions: number;
+	comments: number;
+	reviews: number;
+};
+
+export type IssueFact = {
+	owner: string;
+	repo: string;
+	number: number;
+	createdAt: Date;
+	closedAt: Date | null;
+	labels: string[];
+};
+
+export type CommitFact = {
+	owner: string;
+	repo: string;
+	oid: string;
+	authorLogin: string | null;
+	authorEmail: string | null;
+	committedDate: string; // raw ISO, offset preserved for local-time classification
+	committedAt: Date;
+};
+
+export type ReviewFact = {
+	owner: string;
+	repo: string;
+	id: string;
+	prNumber: number;
+	prAuthor: string | null;
+	reviewer: string;
+	kind: 'review' | 'comment';
+	state: string | null;
+	ts: Date;
+};
+
+export type ReleaseFact = {
+	owner: string;
+	repo: string;
+	tag: string;
+	publishedAt: Date;
+};
+
+export type StockDay = {
+	owner: string;
+	repo: string;
+	day: string; // YYYY-MM-DD, the as-of date
+	issuesOpen: number;
+	bugsOpen: number;
+	prsOpen: number;
+};
+
+export type RepoSyncRow = {
+	owner: string;
+	repo: string;
+	backfilledFrom: string; // YYYY-MM-DD
+	activityBackfilledFrom: string; // YYYY-MM-DD
+	syncedThrough: string; // YYYY-MM-DD
+	fetchedAt: Date;
+};
+
+/** Everything the aggregator needs for one report, read in one pass. */
+export type FactBundle = {
+	prs: PrFact[];
+	issues: IssueFact[];
+	commits: CommitFact[];
+	reviews: ReviewFact[];
+	releases: ReleaseFact[];
+	stocks: StockDay[];
 };
 
 export type Selection = {
@@ -93,7 +229,8 @@ export type OpenPr = {
 	deletions: number;
 };
 
-export type AttentionReason = 'unreviewed' | 'changes_requested' | 'stale' | 'aging' | 'draft_stale';
+export type AttentionReason =
+	'unreviewed' | 'changes_requested' | 'stale' | 'aging' | 'draft_stale';
 
 export type AttentionItem = OpenPr & {
 	ageDays: number; // since opened
@@ -140,7 +277,12 @@ export type BotActivity = {
 };
 
 /** One bot's review/comment counts in one month, for trend charts. */
-export type BotMonthActivity = { month: string; login: string; reviews: number; comments: number };
+export type BotMonthActivity = {
+	month: string;
+	login: string;
+	reviews: number;
+	comments: number;
+};
 
 export type FlowResult = {
 	overall: FlowStats;

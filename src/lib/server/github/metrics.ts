@@ -1,8 +1,20 @@
 import { type GraphQL } from './client';
 import { median, round, isBugLabel, makeBugMatcher } from './stats';
 import { type Month, monthKey, monthStart, monthEnd, monthStartMs, monthEndMs } from './months';
-import type { Repo, Member, RepoMonth, OpenPr, PrFlow, BotActivity, BotMonthActivity } from './types';
-import type { MemberRepoMonthRow, ReviewRepoMonthRow } from '../store/assemble';
+import type {
+	Repo,
+	RepoMonth,
+	OpenPr,
+	PrFlow,
+	BotActivity,
+	BotMonthActivity,
+	PrFact,
+	IssueFact,
+	CommitFact,
+	ReviewFact,
+	ReleaseFact,
+	StockDay,
+} from './types';
 
 // Heavy first:100 search aliases trip GitHub's per-query resource limit beyond
 // ~4-5 at once, so every multi-alias query is built in chunks of this size.
@@ -48,7 +60,7 @@ export type PrStats = Pick<
 export function prStatsForMonth(
 	merged: { issueCount: number; nodes: MergedPrNode[] },
 	createdCount: number,
-	closedCount: number
+	closedCount: number,
 ): PrStats {
 	const adds: number[] = [];
 	const dels: number[] = [];
@@ -77,7 +89,7 @@ export function prStatsForMonth(
 		delPerPr: dels.length ? round(median(dels)) : 0,
 		daysPerPr: days.length ? round(median(days), 2) : 0,
 		commentsPerPr: total > 0 ? round(median(comments), 2) : 0,
-		reviewsPerPr: total > 0 ? round(median(reviews), 2) : 0
+		reviewsPerPr: total > 0 ? round(median(reviews), 2) : 0,
 	};
 }
 
@@ -90,8 +102,14 @@ type IssueNode = {
 export function issueStatsForMonth(
 	opened: { issueCount: number; nodes: IssueNode[] },
 	closedCount: number,
-	isBug: (labels: string[]) => boolean = isBugLabel
-): { opened: number; closed: number; bugs: number; resolutionDays: number; resolutionRate: number } {
+	isBug: (labels: string[]) => boolean = isBugLabel,
+): {
+	opened: number;
+	closed: number;
+	bugs: number;
+	resolutionDays: number;
+	resolutionRate: number;
+} {
 	let bugs = 0;
 	const resolutionDaysList: number[] = [];
 	for (const issue of opened.nodes) {
@@ -101,7 +119,7 @@ export function issueStatsForMonth(
 			bugs += 1;
 			if (issue.closedAt) {
 				resolutionDaysList.push(
-					round((Date.parse(issue.closedAt) - Date.parse(issue.createdAt)) / DAY_MS, 2)
+					round((Date.parse(issue.closedAt) - Date.parse(issue.createdAt)) / DAY_MS, 2),
 				);
 			}
 		}
@@ -111,17 +129,15 @@ export function issueStatsForMonth(
 		closed: closedCount,
 		bugs,
 		resolutionDays: resolutionDaysList.length ? round(median(resolutionDaysList), 2) : 0,
-		resolutionRate: bugs > 0 ? round((resolutionDaysList.length / bugs) * 100, 1) : 0
+		resolutionRate: bugs > 0 ? round((resolutionDaysList.length / bugs) * 100, 1) : 0,
 	};
 }
 
-type ReviewPrNode = {
-	author: { login: string } | null;
-	reviews: { nodes: { author: { login: string } | null; submittedAt: string | null; state: string }[] };
-	comments: { nodes: { author: { login: string } | null; createdAt: string }[] };
+type CommitNode = {
+	oid: string;
+	committedDate: string;
+	author: { email: string | null; user: { login: string } | null };
 };
-
-type CommitNode = { oid: string; committedDate: string; author: { email: string | null; user: { login: string } | null } };
 
 // --- Burnout / recovery: when (in the committer's LOCAL time) was a commit made ---
 // We need the committer's local wall clock. Sources, in priority order:
@@ -132,7 +148,15 @@ type CommitNode = { oid: string; committedDate: string; author: { email: string 
 //   2. The UTC offset embedded in `committedDate` (a correctly-configured machine).
 //   3. Plain UTC when neither is available.
 
-const WEEKDAY_NUM: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+const WEEKDAY_NUM: Record<string, number> = {
+	Sun: 0,
+	Mon: 1,
+	Tue: 2,
+	Wed: 3,
+	Thu: 4,
+	Fri: 5,
+	Sat: 6,
+};
 
 // Constructing an Intl.DateTimeFormat is the expensive part of timezone formatting,
 // so cache one per zone: the per-commit classification runs over thousands of commits
@@ -148,7 +172,7 @@ function tzFormatter(tz: string): Intl.DateTimeFormat {
 			hour: '2-digit',
 			year: 'numeric',
 			month: '2-digit',
-			day: '2-digit'
+			day: '2-digit',
 		});
 		tzFormatters.set(tz, f);
 	}
@@ -158,7 +182,10 @@ function tzFormatter(tz: string): Intl.DateTimeFormat {
 /** Local weekday (0=Sun..6=Sat), hour (0-23), and integer local-day number for a
  * commit instant — in `tz` (IANA) when given, else from the timestamp's own offset
  * (a zone-less timestamp is pinned to UTC so the result is never server-dependent). */
-function localParts(iso: string, tz?: string): { dow: number; hour: number; dayNum: number } | null {
+function localParts(
+	iso: string,
+	tz?: string,
+): { dow: number; hour: number; dayNum: number } | null {
 	const m = /([+-])(\d{2}):?(\d{2})$/.exec(iso);
 	const hasZone = !!m || /[zZ]$/.test(iso);
 	const ms = Date.parse(hasZone ? iso : `${iso}Z`);
@@ -170,7 +197,9 @@ function localParts(iso: string, tz?: string): { dow: number; hour: number; dayN
 			const dow = WEEKDAY_NUM[get('weekday')];
 			const hour = Number(get('hour')) % 24; // some engines render midnight as "24"
 			if (dow === undefined || Number.isNaN(hour)) return null;
-			const dayNum = Math.floor(Date.UTC(Number(get('year')), Number(get('month')) - 1, Number(get('day'))) / DAY_MS);
+			const dayNum = Math.floor(
+				Date.UTC(Number(get('year')), Number(get('month')) - 1, Number(get('day'))) / DAY_MS,
+			);
 			return { dow, hour, dayNum };
 		} catch {
 			// Invalid/unknown tz: fall through to the embedded-offset path.
@@ -179,7 +208,11 @@ function localParts(iso: string, tz?: string): { dow: number; hour: number; dayN
 	const offsetMin = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
 	const localMs = ms + offsetMin * 60_000;
 	const d = new Date(localMs);
-	return { dow: d.getUTCDay(), hour: d.getUTCHours(), dayNum: Math.floor(localMs / DAY_MS) };
+	return {
+		dow: d.getUTCDay(),
+		hour: d.getUTCHours(),
+		dayNum: Math.floor(localMs / DAY_MS),
+	};
 }
 
 /** Local weekday + hour for a commit, in the member's timezone when known. */
@@ -199,10 +232,16 @@ export function weekIdOf(iso: string, tz?: string): number | null {
 
 /** Classify a commit's local timestamp into the two burnout buckets: committed on a
  * weekend (Sat/Sun), and/or in the late-night window (22:00-05:59), in `tz` if known. */
-export function classifyCommitTime(iso: string, tz?: string): { weekend: boolean; lateNight: boolean } {
+export function classifyCommitTime(
+	iso: string,
+	tz?: string,
+): { weekend: boolean; lateNight: boolean } {
 	const p = localParts(iso, tz);
 	if (!p) return { weekend: false, lateNight: false };
-	return { weekend: p.dow === 0 || p.dow === 6, lateNight: p.hour >= 22 || p.hour < 6 };
+	return {
+		weekend: p.dow === 0 || p.dow === 6,
+		lateNight: p.hour >= 22 || p.hour < 6,
+	};
 }
 
 /** Attribute a commit to exactly one member: a linked GitHub login wins, then a
@@ -211,7 +250,7 @@ export function classifyCommitTime(iso: string, tz?: string): { weekend: boolean
 export function pickCommitMember(
 	author: CommitNode['author'] | null,
 	byLogin: Map<string, string>,
-	byEmail: Map<string, string>
+	byEmail: Map<string, string>,
 ): string | null {
 	if (!author) return null;
 	// A linked GitHub identity is authoritative: if the commit has a user, attribute
@@ -228,7 +267,7 @@ export function pickCommitMember(
 async function runChunkedAliases(
 	gql: GraphQL,
 	aliasBlocks: string[],
-	perQuery = ALIASES_PER_QUERY
+	perQuery = ALIASES_PER_QUERY,
 ): Promise<Record<string, any>> {
 	const merged: Record<string, any> = {};
 	for (const group of chunk(aliasBlocks, perQuery)) {
@@ -239,21 +278,22 @@ async function runChunkedAliases(
 }
 
 // Node selections shared by the alias block and the pagination drainer so both
-// request identical fields.
-// Code-volume + lead-time stats are computed over the MERGED cohort (PRs merged
-// in the month), so they reconcile with the merged count and the per-member
-// rollup, which also use the merged cohort.
-const MERGED_VOLUME_FIELDS = `... on PullRequest { additions deletions createdAt mergedAt comments { totalCount } reviews { totalCount } }`;
-const ISSUE_NODE_FIELDS = `... on Issue { createdAt closedAt labels(first: 10) { nodes { name } } }`;
-const MERGED_PR_NODE_FIELDS = `... on PullRequest { author { login } additions deletions }`;
-const REVIEW_PR_NODE_FIELDS = `... on PullRequest { author { login } reviews(first: 50) { nodes { author { login } submittedAt state } } comments(first: 100) { nodes { author { login } createdAt } } }`;
+// request identical fields. Fact fetchers pull the full node once and store it
+// raw; all classification (bug labels, member attribution, windows) happens at
+// read time in the aggregator.
+const PR_FACT_FIELDS = `... on PullRequest { number author { login } createdAt mergedAt closedAt additions deletions comments { totalCount } reviews { totalCount } }`;
+const ISSUE_FACT_FIELDS = `... on Issue { number createdAt closedAt labels(first: 10) { nodes { name } } }`;
+const REVIEW_FACT_PR_FIELDS = `... on PullRequest { number author { login } reviews(first: 50) { nodes { id author { login } submittedAt state } } comments(first: 100) { nodes { id author { login } createdAt } } }`;
 const FLOW_PR_NODE_FIELDS = `... on PullRequest { createdAt mergedAt reviews(first: 100) { nodes { submittedAt state author { login __typename avatarUrl } comments { totalCount } } } }`;
-const mergedVolumeQuery = (owner: string, repo: string, m: Month) =>
-	`repo:${owner}/${repo} type:pr is:merged merged:${monthStart(m)}..${monthEnd(m)} sort:created-asc`;
-const openedIssueQuery = (owner: string, repo: string, m: Month) =>
-	`repo:${owner}/${repo} type:issue created:${monthStart(m)}..${monthEnd(m)} sort:created-asc`;
 
-type Page<T> = { nodes?: T[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string } };
+/** Inclusive day range, "YYYY-MM-DD". Callers slice long spans into
+ * calendar-month ranges so no single search can hit GitHub's 1000-result cap. */
+export type DayRange = { s: string; e: string };
+
+type Page<T> = {
+	nodes?: T[];
+	pageInfo?: { hasNextPage?: boolean; endCursor?: string };
+};
 
 /** Drain a Relay-style cursor connection past its first page. `fetchPage(after)`
  * returns the next page's nodes and the cursor to continue (null when done).
@@ -261,7 +301,7 @@ type Page<T> = { nodes?: T[]; pageInfo?: { hasNextPage?: boolean; endCursor?: st
 async function drainConnection<T>(
 	first: Page<T>,
 	fetchPage: (after: string) => Promise<{ nodes: T[]; cursor: string | null }>,
-	maxPages = 20
+	maxPages = 20,
 ): Promise<T[]> {
 	const nodes = [...(first.nodes ?? [])];
 	let cursor = first.pageInfo?.hasNextPage ? (first.pageInfo.endCursor ?? null) : null;
@@ -279,42 +319,33 @@ async function drainSearchNodes(
 	gql: GraphQL,
 	query: string,
 	fields: string,
-	first: Page<any>
+	first: Page<any>,
 ): Promise<any[]> {
 	return drainConnection(first, async (after) => {
 		const data: any = await gql(
 			`{ search(query: ${JSON.stringify(query)}, type: ISSUE, first: 100, after: "${after}") {
         nodes { ${fields} } pageInfo { hasNextPage endCursor }
-      } }`
+      } }`,
 		);
 		const sr = data.search;
-		return { nodes: sr?.nodes ?? [], cursor: sr?.pageInfo?.hasNextPage ? (sr.pageInfo.endCursor ?? null) : null };
+		return {
+			nodes: sr?.nodes ?? [],
+			cursor: sr?.pageInfo?.hasNextPage ? (sr.pageInfo.endCursor ?? null) : null,
+		};
 	});
 }
 
-function prAliasBlock(owner: string, repo: string, m: Month, i: number): string {
-	const s = monthStart(m);
-	const e = monthEnd(m);
-	return `
-    created_${i}: search(query: "repo:${owner}/${repo} type:pr created:${s}..${e}", type: ISSUE, first: 1) { issueCount }
-    merged_${i}: search(query: "${mergedVolumeQuery(owner, repo, m)}", type: ISSUE, first: 100) {
-      issueCount
-      nodes { ${MERGED_VOLUME_FIELDS} }
-      pageInfo { hasNextPage endCursor }
-    }
-    closed_${i}: search(query: "repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}", type: ISSUE, first: 1) { issueCount }`;
-}
-
-function issueAliasBlock(owner: string, repo: string, m: Month, i: number): string {
-	const s = monthStart(m);
-	const e = monthEnd(m);
-	return `
-    opened_${i}: search(query: "${openedIssueQuery(owner, repo, m)}", type: ISSUE, first: 100) {
-      issueCount
-      nodes { ${ISSUE_NODE_FIELDS} }
-      pageInfo { hasNextPage endCursor }
-    }
-    closed_${i}: search(query: "repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}", type: ISSUE, first: 1) { issueCount }`;
+/** Search + drain every node for `query` (first page fetched here too). */
+async function searchAllNodes(gql: GraphQL, query: string, fields: string): Promise<any[]> {
+	const data: any = await gql(
+		`{ search(query: ${JSON.stringify(query)}, type: ISSUE, first: 100) {
+      nodes { ${fields} } pageInfo { hasNextPage endCursor }
+    } }`,
+	);
+	const first = data.search ?? {};
+	return first.pageInfo?.hasNextPage
+		? drainSearchNodes(gql, query, fields, first)
+		: (first.nodes ?? []);
 }
 
 // GitHub search `label:` OR-list from configured names (default to the common
@@ -322,16 +353,19 @@ function issueAliasBlock(owner: string, repo: string, m: Month, i: number): stri
 // the surrounding GraphQL string. Search is label-exact, so this is the closest
 // approximation of the bug matcher for the cumulative stock counts.
 function bugLabelSearch(configured: string[]): string {
-	const labels = configured.length ? configured : ['bug', 'bugs', 'type: bug', 'type:bug', 'kind/bug'];
+	const labels = configured.length
+		? configured
+		: ['bug', 'bugs', 'type: bug', 'type:bug', 'kind/bug'];
 	return 'label:' + labels.map((l) => (/[\s:]/.test(l) ? `\\"${l}\\"` : l)).join(',');
 }
 
-function stockAliasBlock(owner: string, repo: string, m: Month, i: number, bugLabels: string): string {
-	// Snapshot "as of" the month end, but never a future date: for the in-progress
-	// month, clamp to today so open/stale counts aren't measured against the future.
-	const today = new Date().toISOString().slice(0, 10);
-	const end = monthEnd(m);
-	const d = end > today ? today : end;
+function stockAliasBlock(
+	owner: string,
+	repo: string,
+	d: string,
+	i: number,
+	bugLabels: string,
+): string {
 	const r = (q: string, alias: string) =>
 		`${alias}_${i}: search(query: "repo:${owner}/${repo} ${q}", type: ISSUE, first: 1) { issueCount }`;
 	return [
@@ -340,165 +374,167 @@ function stockAliasBlock(owner: string, repo: string, m: Month, i: number, bugLa
 		r(`type:issue ${bugLabels} created:<=${d}`, 'b_open'),
 		r(`type:issue ${bugLabels} closed:<=${d}`, 'b_closed'),
 		r(`type:pr created:<=${d}`, 'p_open'),
-		r(`type:pr closed:<=${d}`, 'p_closed')
+		r(`type:pr closed:<=${d}`, 'p_closed'),
 	].join('\n');
 }
 
-async function fetchRepoSeries(
+/** Open-stock snapshot (open issues / bugs / PRs) as-of `day` for one repo —
+ * cumulative created-minus-closed counts, matching the legacy month-end rule.
+ * Cheap: six first:1 count searches. Callers clamp `day` to today. */
+export async function fetchStockAsOf(
 	gql: GraphQL,
 	{ owner, repo }: Repo,
-	months: Month[],
-	bugLabels: string[] = []
-): Promise<RepoMonth[]> {
-	const isBug = makeBugMatcher(bugLabels);
+	days: string[],
+	bugLabels: string[] = [],
+): Promise<StockDay[]> {
+	if (!days.length) return [];
 	const bugSearch = bugLabelSearch(bugLabels);
-	const prBlocks = months.map((m, i) => prAliasBlock(owner, repo, m, i));
-	const issueBlocks = months.map((m, i) => issueAliasBlock(owner, repo, m, i));
-	// Stock aliases are first:1 (cheap); 8 per month is fine in larger chunks.
-	const stockBlocks = months.map((m, i) => stockAliasBlock(owner, repo, m, i, bugSearch));
-
-	const [prData, issueData, stockData, releaseCounts] = await Promise.all([
-		runChunkedAliases(gql, prBlocks),
-		runChunkedAliases(gql, issueBlocks),
-		runChunkedAliases(gql, stockBlocks, 6),
-		fetchReleases(gql, owner, repo, months)
-	]);
-
-	// GitHub can return a 200 with partial data (a per-field resource limit or an
-	// inaccessible repo nulls individual aliases); default missing aliases to empty
-	// so one bad field doesn't 500 the whole report.
-	const emptySearch = { issueCount: 0, nodes: [] };
-	return Promise.all(
-		months.map(async (m, i) => {
-		const count = (alias: string) => stockData[alias]?.issueCount ?? 0;
-		// Drain past 100 nodes for high-volume months so sums/medians/bug counts
-		// reflect every PR/issue, not just the first page.
-		const mergedRaw = prData[`merged_${i}`] ?? emptySearch;
-		const mergedNodes = mergedRaw.pageInfo?.hasNextPage
-			? await drainSearchNodes(gql, mergedVolumeQuery(owner, repo, m), MERGED_VOLUME_FIELDS, mergedRaw)
-			: (mergedRaw.nodes ?? []);
-		const openedRaw = issueData[`opened_${i}`] ?? emptySearch;
-		const openedNodes = openedRaw.pageInfo?.hasNextPage
-			? await drainSearchNodes(gql, openedIssueQuery(owner, repo, m), ISSUE_NODE_FIELDS, openedRaw)
-			: (openedRaw.nodes ?? []);
-		const pr = prStatsForMonth({ issueCount: mergedRaw.issueCount ?? 0, nodes: mergedNodes }, prData[`created_${i}`]?.issueCount ?? 0, prData[`closed_${i}`]?.issueCount ?? 0);
-		const iss = issueStatsForMonth({ issueCount: openedRaw.issueCount ?? 0, nodes: openedNodes }, issueData[`closed_${i}`]?.issueCount ?? 0, isBug);
-		const issuesOpen = Math.max(0, count(`i_open_${i}`) - count(`i_closed_${i}`));
-		const bugsOpen = Math.max(0, count(`b_open_${i}`) - count(`b_closed_${i}`));
-		const prsOpen = Math.max(0, count(`p_open_${i}`) - count(`p_closed_${i}`));
+	const blocks = days.map((d, i) => stockAliasBlock(owner, repo, d, i, bugSearch));
+	const data = await runChunkedAliases(gql, blocks, 6);
+	return days.map((day, i) => {
+		const count = (alias: string) => data[`${alias}_${i}`]?.issueCount ?? 0;
 		return {
 			owner,
 			repo,
-			month: monthKey(m),
-			...pr,
-			bugs: iss.bugs,
-			issues: iss.opened,
-			issuesOpen,
-			bugsOpen,
-			prsOpen,
-			releases: releaseCounts[i],
-			resolutionDays: iss.resolutionDays,
-			resolutionRate: iss.resolutionRate
+			day,
+			issuesOpen: Math.max(0, count(`i_open`) - count(`i_closed`)),
+			bugsOpen: Math.max(0, count(`b_open`) - count(`b_closed`)),
+			prsOpen: Math.max(0, count(`p_open`) - count(`p_closed`)),
 		};
-		})
-	);
+	});
 }
 
-async function fetchReleases(gql: GraphQL, owner: string, repo: string, months: Month[]): Promise<number[]> {
-	const counts = months.map(() => 0);
-	if (!months.length) return counts;
-	// Releases are newest-first; page until we pass the start of the window so a
-	// repo with >100 recent releases doesn't truncate older requested months.
-	const windowStartMs = monthStartMs(months[0]);
-	let cursor: string | null = null;
-	for (let page = 0; page < 10; page++) {
-		const data = await gql(`{
-      repository(owner: "${owner}", name: "${repo}") {
-        releases(first: 100, after: ${cursor ? `"${cursor}"` : 'null'}, orderBy: { field: CREATED_AT, direction: DESC }) {
-          pageInfo { hasNextPage endCursor }
-          nodes { publishedAt isDraft isPrerelease }
-        }
-      }
-    }`);
-		const conn = (data.repository as any)?.releases;
-		if (!conn) break;
-		let oldestMs = Infinity;
-		for (const rel of conn.nodes) {
-			if (rel.isDraft || rel.isPrerelease || !rel.publishedAt) continue;
-			const t = Date.parse(rel.publishedAt);
-			oldestMs = Math.min(oldestMs, t);
-			const d = new Date(rel.publishedAt);
-			const idx = months.findIndex((m) => m.year === d.getUTCFullYear() && m.month === d.getUTCMonth() + 1);
-			if (idx >= 0) counts[idx] += 1;
-		}
-		if (!conn.pageInfo.hasNextPage || oldestMs < windowStartMs) break;
-		cursor = conn.pageInfo.endCursor;
-	}
-	return counts;
-}
+// ---------------------------------------------------------------------------
+// Fact fetchers. Each pulls raw GitHub events for explicit day ranges and
+// returns store-ready fact rows; nothing is classified or bucketed here. The
+// created:.. AND closed:.. searches together guarantee every PR/issue relevant
+// to a window is captured: an item created before the backfill horizon still
+// appears (and gets its terminal timestamps) the moment it closes or merges.
+// ---------------------------------------------------------------------------
 
-/** Per-reviewer reviews/comments made (excludes self + PENDING + out-of-window),
- * for EVERY reviewer — the store keeps all of them so any team's "Others" bucket
- * can be reconstructed later. */
-export function reviewCountsFromNodes(
-	prs: ReviewPrNode[],
-	startMs: number,
-	endMs: number
-): Map<string, { reviews: number; comments: number }> {
-	const counts = new Map<string, { reviews: number; comments: number }>();
-	const bump = (login: string, key: 'reviews' | 'comments') => {
-		const e = counts.get(login) ?? { reviews: 0, comments: 0 };
-		e[key] += 1;
-		counts.set(login, e);
-	};
-	for (const pr of prs) {
-		if (!pr) continue; // partial 200s can null individual search nodes
-		const prAuthor = pr.author?.login ?? null;
-		for (const review of pr.reviews?.nodes ?? []) {
-			const reviewer = review.author?.login ?? null;
-			if (!reviewer || reviewer === prAuthor || review.state === 'PENDING' || !review.submittedAt) continue;
-			const t = Date.parse(review.submittedAt);
-			if (t >= startMs && t <= endMs) bump(reviewer, 'reviews');
-		}
-		for (const comment of pr.comments?.nodes ?? []) {
-			const commenter = comment.author?.login ?? null;
-			if (!commenter || commenter === prAuthor) continue;
-			const t = Date.parse(comment.createdAt);
-			if (t >= startMs && t <= endMs) bump(commenter, 'comments');
+const dateOrNull = (iso: string | null | undefined): Date | null => (iso ? new Date(iso) : null);
+
+/** PR facts touched (created or closed/merged) in the given ranges of one repo. */
+export async function fetchPrFactRows(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	ranges: DayRange[],
+): Promise<PrFact[]> {
+	const byNumber = new Map<number, PrFact>();
+	for (const { s, e } of ranges) {
+		const queries = [
+			`repo:${owner}/${repo} type:pr created:${s}..${e}`,
+			`repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}`,
+		];
+		for (const q of queries) {
+			for (const pr of await searchAllNodes(gql, q, PR_FACT_FIELDS)) {
+				if (!pr || typeof pr.number !== 'number' || !pr.createdAt) continue;
+				byNumber.set(pr.number, {
+					owner,
+					repo,
+					number: pr.number,
+					author: pr.author?.login ?? null,
+					createdAt: new Date(pr.createdAt),
+					mergedAt: dateOrNull(pr.mergedAt),
+					closedAt: dateOrNull(pr.closedAt),
+					additions: pr.additions ?? 0,
+					deletions: pr.deletions ?? 0,
+					comments: pr.comments?.totalCount ?? 0,
+					reviews: pr.reviews?.totalCount ?? 0,
+				});
+			}
 		}
 	}
-	return counts;
+	return [...byNumber.values()];
 }
 
-async function fetchCommitData(gql: GraphQL, repos: Repo[], m: Month): Promise<Record<string, any>> {
-	const s = monthStart(m);
-	const e = monthEnd(m);
-	const blocks = repos.flatMap(({ owner, repo }, i) => [
-		`pr${i}: search(query: "repo:${owner}/${repo} type:pr updated:${s}..${e}", type: ISSUE, first: 100) {
-      nodes { ... on PullRequest { commits(first: 100) { nodes { commit { oid committedDate author { email user { login } } } } } } }
-    }`,
-		`main${i}: repository(owner: "${owner}", name: "${repo}") {
-      defaultBranchRef { target { ... on Commit { history(first: 100, since: "${s}T00:00:00Z", until: "${e}T23:59:59.999Z") {
-        nodes { oid committedDate author { email user { login } } }
-        pageInfo { hasNextPage endCursor }
-      } } } }
-    }`
-	]);
-	// Each block is a heavy nested query; keep chunks small.
-	return runChunkedAliases(gql, blocks, 2);
+/** Issue facts touched (created or closed) in the given ranges of one repo. */
+export async function fetchIssueFactRows(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	ranges: DayRange[],
+): Promise<IssueFact[]> {
+	const byNumber = new Map<number, IssueFact>();
+	for (const { s, e } of ranges) {
+		const queries = [
+			`repo:${owner}/${repo} type:issue created:${s}..${e}`,
+			`repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}`,
+		];
+		for (const q of queries) {
+			for (const issue of await searchAllNodes(gql, q, ISSUE_FACT_FIELDS)) {
+				if (!issue || typeof issue.number !== 'number' || !issue.createdAt) continue;
+				byNumber.set(issue.number, {
+					owner,
+					repo,
+					number: issue.number,
+					createdAt: new Date(issue.createdAt),
+					closedAt: dateOrNull(issue.closedAt),
+					labels: (issue.labels?.nodes ?? []).map((l: { name: string }) => l?.name).filter(Boolean),
+				});
+			}
+		}
+	}
+	return [...byNumber.values()];
+}
+
+/** Review + review-comment facts from PRs UPDATED in the given ranges. Any new
+ * review activity updates its PR, so refreshing the recently-updated set catches
+ * every new event; the id-keyed upsert dedupes re-seen history. */
+export async function fetchReviewFactRows(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	ranges: DayRange[],
+): Promise<ReviewFact[]> {
+	const byId = new Map<string, ReviewFact>();
+	for (const { s, e } of ranges) {
+		const q = `repo:${owner}/${repo} type:pr updated:${s}..${e}`;
+		for (const pr of await searchAllNodes(gql, q, REVIEW_FACT_PR_FIELDS)) {
+			if (!pr || typeof pr.number !== 'number') continue;
+			const prAuthor = pr.author?.login ?? null;
+			for (const r of pr.reviews?.nodes ?? []) {
+				// PENDING reviews have no submittedAt and are not activity yet.
+				if (!r?.id || !r.author?.login || !r.submittedAt) continue;
+				byId.set(r.id, {
+					owner,
+					repo,
+					id: r.id,
+					prNumber: pr.number,
+					prAuthor,
+					reviewer: r.author.login,
+					kind: 'review',
+					state: r.state ?? null,
+					ts: new Date(r.submittedAt),
+				});
+			}
+			for (const c of pr.comments?.nodes ?? []) {
+				if (!c?.id || !c.author?.login || !c.createdAt) continue;
+				byId.set(c.id, {
+					owner,
+					repo,
+					id: c.id,
+					prNumber: pr.number,
+					prAuthor,
+					reviewer: c.author.login,
+					kind: 'comment',
+					state: null,
+					ts: new Date(c.createdAt),
+				});
+			}
+		}
+	}
+	return [...byId.values()];
 }
 
 type HistoryPage = { nodes: CommitNode[]; cursor: string | null };
 
-/** One page of default-branch history after a cursor (used to drain repos whose
- * month has more than 100 default-branch commits, which the batched query caps). */
+/** One page of default-branch history after a cursor (drains repos with more
+ * than 100 commits in the fetched range). */
 async function fetchHistoryPage(
 	gql: GraphQL,
 	owner: string,
 	repo: string,
-	s: string,
-	e: string,
-	after: string
+	{ s, e }: DayRange,
+	after: string,
 ): Promise<HistoryPage> {
 	const data = await gql(`{
     repository(owner: "${owner}", name: "${repo}") {
@@ -509,194 +545,94 @@ async function fetchHistoryPage(
     }
   }`);
 	const h = (data.repository as any)?.defaultBranchRef?.target?.history;
-	return { nodes: h?.nodes ?? [], cursor: h?.pageInfo?.hasNextPage ? h.pageInfo.endCursor : null };
-}
-
-// ---------------------------------------------------------------------------
-// Per-entity row fetchers (live). These fetch ONLY the months asked for, so the
-// orchestrator can call them for just the months missing from the store.
-// ---------------------------------------------------------------------------
-
-/** Repo-month rows for the given repos + months (parallel per repo). */
-export async function fetchRepoMonthRows(
-	gql: GraphQL,
-	repos: Repo[],
-	months: Month[],
-	bugLabels: string[] = []
-): Promise<RepoMonth[]> {
-	if (!months.length) return [];
-	const all = await Promise.all(repos.map((r) => fetchRepoSeries(gql, r, months, bugLabels)));
-	return all.flat();
-}
-
-/** Commits + merged-PRs per (member, repo, month). Only non-empty rows are returned. */
-export async function fetchMemberRepoMonthRows(
-	gql: GraphQL,
-	repos: Repo[],
-	members: Member[],
-	months: Month[]
-): Promise<MemberRepoMonthRow[]> {
-	if (!months.length || !members.length || !repos.length) return [];
-	const acc = new Map<string, MemberRepoMonthRow>(); // `${login}::${owner}/${repo}::${month}`
-	const row = (login: string, owner: string, repo: string, month: string) => {
-		const k = `${login}::${owner}/${repo}::${month}`;
-		let r = acc.get(k);
-		if (!r) {
-			r = { login, owner, repo, month, commits: 0, weekendCommits: 0, lateNightCommits: 0, activeWeeks: [], mergedPrs: 0, additions: 0, deletions: 0 };
-			acc.set(k, r);
-		}
-		return r;
+	return {
+		nodes: h?.nodes ?? [],
+		cursor: h?.pageInfo?.hasNextPage ? h.pageInfo.endCursor : null,
 	};
-
-	// Member lookup maps (built once) so commit attribution is a single O(commits)
-	// pass per repo/month instead of O(members x commits) re-scans.
-	const byLogin = new Map(members.map((mm) => [mm.login.toLowerCase(), mm.login]));
-	// Effective IANA timezone per member (already resolved member-override-or-team-
-	// default upstream), keyed by canonical login, for local-time burnout classification.
-	const tzByLogin = new Map(members.map((mm) => [mm.login, mm.tz]));
-	// Email is the fallback when a commit has no linked GitHub user. Drop any email
-	// claimed by more than one member (shared/misconfigured address), otherwise it
-	// would mis-attribute every commit authored under it to one arbitrary member.
-	const emailOwners = new Map<string, Set<string>>();
-	for (const mm of members) {
-		if (!mm.email) continue;
-		const k = mm.email.toLowerCase();
-		(emailOwners.get(k) ?? emailOwners.set(k, new Set()).get(k)!).add(mm.login);
-	}
-	const byEmail = new Map(
-		[...emailOwners].filter(([, owners]) => owners.size === 1).map(([k, owners]) => [k, [...owners][0]])
-	);
-	const matchedMember = (author: CommitNode['author']): string | null =>
-		pickCommitMember(author, byLogin, byEmail);
-
-	// Commits: fetch every month in parallel (bounded by the GraphQL semaphore),
-	// then attribute each unique SHA to the matching member(s) in one pass.
-	const commitWork = Promise.all(
-		months.map(async (m) => {
-			const month = monthKey(m);
-			const startMs = monthStartMs(m);
-			const endMs = monthEndMs(m);
-			const commitData = await fetchCommitData(gql, repos, m);
-			await Promise.all(
-				repos.map(async ({ owner, repo }, i) => {
-					const prCommits: CommitNode[] = (commitData[`pr${i}`]?.nodes ?? []).flatMap(
-						(pr: any) => (pr?.commits?.nodes ?? []).map((c: any) => c.commit)
-					);
-					// Drain repos with >100 default-branch commits this month (the batched
-					// query only returns the first page) so commit counts aren't truncated.
-					const history = commitData[`main${i}`]?.defaultBranchRef?.target?.history;
-					const mainCommits: CommitNode[] = await drainConnection<CommitNode>(
-						history ?? {},
-						async (after) => fetchHistoryPage(gql, owner, repo, monthStart(m), monthEnd(m), after),
-						50
-					);
-					// member login -> unique SHA -> when (local) it was committed + its week
-					// bucket. Keyed by SHA so a commit seen via both a PR and the default
-					// branch counts once, and its classification is computed a single time.
-					const shas = new Map<string, Map<string, { weekend: boolean; lateNight: boolean; week: number | null }>>();
-					const add = (login: string, c: CommitNode) => {
-						let s = shas.get(login);
-						if (!s) shas.set(login, (s = new Map()));
-						if (!s.has(c.oid)) {
-							const tz = tzByLogin.get(login);
-							s.set(c.oid, { ...classifyCommitTime(c.committedDate, tz), week: weekIdOf(c.committedDate, tz) });
-						}
-					};
-					for (const c of prCommits) {
-						const t = Date.parse(c.committedDate);
-						if (t < startMs || t > endMs) continue;
-						const login = matchedMember(c.author);
-						if (login) add(login, c);
-					}
-					for (const c of mainCommits) {
-						const login = matchedMember(c.author);
-						if (login) add(login, c);
-					}
-					for (const [login, set] of shas) {
-						const r = row(login, owner, repo, month);
-						r.commits += set.size;
-						const weeks = new Set(r.activeWeeks);
-						for (const cls of set.values()) {
-							if (cls.weekend) r.weekendCommits += 1;
-							if (cls.lateNight) r.lateNightCommits += 1;
-							if (cls.week !== null) weeks.add(cls.week);
-						}
-						r.activeWeeks = [...weeks];
-					}
-				})
-			);
-		})
-	);
-
-	// Merged PRs by author, per repo, all repos in parallel.
-	const mergedWork = Promise.all(
-		repos.map(async ({ owner, repo }) => {
-			const mergedQuery = (m: Month) =>
-				`repo:${owner}/${repo} type:pr is:merged merged:${monthStart(m)}..${monthEnd(m)}`;
-			const blocks = months.map(
-				(m, i) => `m_${i}: search(query: "${mergedQuery(m)}", type: ISSUE, first: 100) {
-        nodes { ${MERGED_PR_NODE_FIELDS} }
-        pageInfo { hasNextPage endCursor }
-      }`
-			);
-			const data = await runChunkedAliases(gql, blocks);
-			await Promise.all(
-				months.map(async (m, i) => {
-					const raw = data[`m_${i}`];
-					const nodes = raw?.pageInfo?.hasNextPage
-						? await drainSearchNodes(gql, mergedQuery(m), MERGED_PR_NODE_FIELDS, raw)
-						: (raw?.nodes ?? []);
-					for (const pr of nodes) {
-						if (!pr) continue; // partial 200s can null individual search nodes
-						const canon = pr.author?.login && byLogin.get(pr.author.login.toLowerCase());
-						if (canon) {
-							const r = row(canon, owner, repo, monthKey(m));
-							r.mergedPrs += 1;
-							r.additions += pr.additions ?? 0;
-							r.deletions += pr.deletions ?? 0;
-						}
-					}
-				})
-			);
-		})
-	);
-
-	await Promise.all([commitWork, mergedWork]);
-	return [...acc.values()].filter((r) => r.commits > 0 || r.mergedPrs > 0);
 }
 
-/** Reviews/comments per (reviewer, repo, month) for every reviewer. */
-export async function fetchReviewRepoMonthRows(gql: GraphQL, repos: Repo[], months: Month[]): Promise<ReviewRepoMonthRow[]> {
-	if (!months.length || !repos.length) return [];
-	const out: ReviewRepoMonthRow[] = [];
-	await Promise.all(
-		months.map(async (m) => {
-			const month = monthKey(m);
-			const startMs = monthStartMs(m);
-			const endMs = monthEndMs(m);
-			const reviewQuery = (owner: string, repo: string) =>
-				`repo:${owner}/${repo} type:pr updated:${monthStart(m)}..${monthEnd(m)}`;
-			const blocks = repos.map(
-				({ owner, repo }, i) => `
-      r${i}: search(query: "${reviewQuery(owner, repo)}", type: ISSUE, first: 100) {
-        nodes { ${REVIEW_PR_NODE_FIELDS} }
+/** Commit facts for one repo over one range: default-branch history plus commits
+ * on PRs updated in the range (feature-branch work), deduped by SHA. Attribution
+ * to members happens at read time, so facts are stored for every author. */
+export async function fetchCommitFactRows(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	range: DayRange,
+): Promise<CommitFact[]> {
+	const { s, e } = range;
+	const startMs = Date.parse(`${s}T00:00:00Z`);
+	const endMs = Date.parse(`${e}T23:59:59.999Z`);
+	const blocks = [
+		`pr0: search(query: "repo:${owner}/${repo} type:pr updated:${s}..${e}", type: ISSUE, first: 100) {
+      nodes { ... on PullRequest { commits(first: 100) { nodes { commit { oid committedDate author { email user { login } } } } } } }
+    }`,
+		`main0: repository(owner: "${owner}", name: "${repo}") {
+      defaultBranchRef { target { ... on Commit { history(first: 100, since: "${s}T00:00:00Z", until: "${e}T23:59:59.999Z") {
+        nodes { oid committedDate author { email user { login } } }
         pageInfo { hasNextPage endCursor }
-      }`
-			);
-			const data = await runChunkedAliases(gql, blocks);
-			await Promise.all(
-				repos.map(async ({ owner, repo }, i) => {
-					const raw = data[`r${i}`];
-					// Drain >100 updated PRs/month so reviewer/comment counts aren't truncated.
-					const nodes = raw?.pageInfo?.hasNextPage
-						? await drainSearchNodes(gql, reviewQuery(owner, repo), REVIEW_PR_NODE_FIELDS, raw)
-						: (raw?.nodes ?? []);
-					const counts = reviewCountsFromNodes(nodes, startMs, endMs);
-					for (const [reviewer, v] of counts) out.push({ reviewer, owner, repo, month, reviews: v.reviews, comments: v.comments });
-				})
-			);
-		})
+      } } } }
+    }`,
+	];
+	const data = await runChunkedAliases(gql, blocks, 2);
+	const prCommits: CommitNode[] = (data.pr0?.nodes ?? []).flatMap((pr: any) =>
+		(pr?.commits?.nodes ?? []).map((c: any) => c.commit),
 	);
+	const history = data.main0?.defaultBranchRef?.target?.history;
+	const mainCommits = await drainConnection<CommitNode>(
+		history ?? {},
+		async (after) => fetchHistoryPage(gql, owner, repo, range, after),
+		50,
+	);
+	const byOid = new Map<string, CommitFact>();
+	for (const c of [...prCommits, ...mainCommits]) {
+		if (!c?.oid || !c.committedDate) continue;
+		const t = Date.parse(c.committedDate);
+		// PR-associated commits can predate the range (old commits on a freshly
+		// updated PR); keep only the range's own commits so refetches stay bounded.
+		if (Number.isNaN(t) || t < startMs || t > endMs) continue;
+		byOid.set(c.oid, {
+			owner,
+			repo,
+			oid: c.oid,
+			authorLogin: c.author?.user?.login ?? null,
+			authorEmail: c.author?.email ?? null,
+			committedDate: c.committedDate,
+			committedAt: new Date(t),
+		});
+	}
+	return [...byOid.values()];
+}
+
+/** Release facts for one repo, newest-first, paged back until `sinceDay`. */
+export async function fetchReleaseFactRows(
+	gql: GraphQL,
+	{ owner, repo }: Repo,
+	sinceDay: string,
+): Promise<ReleaseFact[]> {
+	const out: ReleaseFact[] = [];
+	const sinceMs = Date.parse(`${sinceDay}T00:00:00Z`);
+	let cursor: string | null = null;
+	for (let page = 0; page < 10; page++) {
+		const data = await gql(`{
+      repository(owner: "${owner}", name: "${repo}") {
+        releases(first: 100, after: ${cursor ? `"${cursor}"` : 'null'}, orderBy: { field: CREATED_AT, direction: DESC }) {
+          pageInfo { hasNextPage endCursor }
+          nodes { tagName publishedAt isDraft isPrerelease }
+        }
+      }
+    }`);
+		const conn = (data.repository as any)?.releases;
+		if (!conn) break;
+		let oldestMs = Infinity;
+		for (const rel of conn.nodes ?? []) {
+			if (!rel || rel.isDraft || rel.isPrerelease || !rel.publishedAt || !rel.tagName) continue;
+			const t = Date.parse(rel.publishedAt);
+			oldestMs = Math.min(oldestMs, t);
+			if (t >= sinceMs) out.push({ owner, repo, tag: rel.tagName, publishedAt: new Date(t) });
+		}
+		if (!conn.pageInfo?.hasNextPage || oldestMs < sinceMs) break;
+		cursor = conn.pageInfo.endCursor;
+	}
 	return out;
 }
 
@@ -715,7 +651,7 @@ export async function fetchOpenPullRequests(gql: GraphQL, repos: Repo[]): Promis
           comments { totalCount }
           reviews { totalCount }
         } }
-      }`
+      }`,
 	);
 	const data = await runChunkedAliases(gql, blocks);
 	const out: OpenPr[] = [];
@@ -736,7 +672,7 @@ export async function fetchOpenPullRequests(gql: GraphQL, repos: Repo[]): Promis
 				reviews: pr.reviews?.totalCount ?? 0,
 				comments: pr.comments?.totalCount ?? 0,
 				additions: pr.additions ?? 0,
-				deletions: pr.deletions ?? 0
+				deletions: pr.deletions ?? 0,
 			});
 		}
 	});
@@ -748,8 +684,12 @@ export async function fetchOpenPullRequests(gql: GraphQL, repos: Repo[]): Promis
 export async function fetchPrFlow(
 	gql: GraphQL,
 	repos: Repo[],
-	months: Month[]
-): Promise<{ prs: PrFlow[]; botActivity: BotActivity[]; botByMonth: BotMonthActivity[] }> {
+	months: Month[],
+): Promise<{
+	prs: PrFlow[];
+	botActivity: BotActivity[];
+	botByMonth: BotMonthActivity[];
+}> {
 	if (!months.length || !repos.length) return { prs: [], botActivity: [], botByMonth: [] };
 	const out: PrFlow[] = [];
 	const botAcc = new Map<string, BotActivity>(); // bot login -> window total
@@ -766,74 +706,88 @@ export async function fetchPrFlow(
       f${i}: search(query: "${mergedFlowQuery(owner, repo)}", type: ISSUE, first: 100) {
         nodes { ${FLOW_PR_NODE_FIELDS} }
         pageInfo { hasNextPage endCursor }
-      }`
+      }`,
 			);
 			const data = await runChunkedAliases(gql, blocks, 2);
 			await Promise.all(
 				repos.map(async ({ owner, repo }, i) => {
-				const raw = data[`f${i}`];
-				// Drain >100 merged PRs/month so flow medians and bot counts are complete.
-				const nodes = raw?.pageInfo?.hasNextPage
-					? await drainSearchNodes(gql, mergedFlowQuery(owner, repo), FLOW_PR_NODE_FIELDS, raw)
-					: (raw?.nodes ?? []);
-				for (const pr of nodes) {
-					if (!pr?.createdAt || !pr?.mergedAt) continue;
-					const submitted: any[] = (pr.reviews?.nodes ?? []).filter(
-						(r: any) => r?.submittedAt && r.author?.login
-					);
-					// Bot reviewers (CodeRabbit, CodeScene, Copilot, ...) are excluded from
-					// human latency stats but tallied here for the Bots page. `comments`
-					// is the inline review-comment volume; `prs` counts each PR once per
-					// bot so the page can show comments-per-PR.
-					const botsOnPr = new Set<string>();
-					let mm = botMonth.get(month);
-					if (!mm) botMonth.set(month, (mm = new Map()));
-					for (const r of submitted) {
-						if (r.author.__typename !== 'Bot') continue;
-						const b = botAcc.get(r.author.login) ?? { login: r.author.login, avatarUrl: r.author.avatarUrl ?? '', reviews: 0, comments: 0, prs: 0 };
-						const verdict = r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED';
-						const comments = r.comments?.totalCount ?? 0;
-						if (verdict) b.reviews += 1;
-						b.comments += comments;
-						botAcc.set(r.author.login, b);
-						const bm = mm.get(r.author.login) ?? { reviews: 0, comments: 0 };
-						if (verdict) bm.reviews += 1;
-						bm.comments += comments;
-						mm.set(r.author.login, bm);
-						botsOnPr.add(r.author.login);
+					const raw = data[`f${i}`];
+					// Drain >100 merged PRs/month so flow medians and bot counts are complete.
+					const nodes = raw?.pageInfo?.hasNextPage
+						? await drainSearchNodes(gql, mergedFlowQuery(owner, repo), FLOW_PR_NODE_FIELDS, raw)
+						: (raw?.nodes ?? []);
+					for (const pr of nodes) {
+						if (!pr?.createdAt || !pr?.mergedAt) continue;
+						const submitted: any[] = (pr.reviews?.nodes ?? []).filter(
+							(r: any) => r?.submittedAt && r.author?.login,
+						);
+						// Bot reviewers (CodeRabbit, CodeScene, Copilot, ...) are excluded from
+						// human latency stats but tallied here for the Bots page. `comments`
+						// is the inline review-comment volume; `prs` counts each PR once per
+						// bot so the page can show comments-per-PR.
+						const botsOnPr = new Set<string>();
+						let mm = botMonth.get(month);
+						if (!mm) botMonth.set(month, (mm = new Map()));
+						for (const r of submitted) {
+							if (r.author.__typename !== 'Bot') continue;
+							const b = botAcc.get(r.author.login) ?? {
+								login: r.author.login,
+								avatarUrl: r.author.avatarUrl ?? '',
+								reviews: 0,
+								comments: 0,
+								prs: 0,
+							};
+							const verdict = r.state === 'APPROVED' || r.state === 'CHANGES_REQUESTED';
+							const comments = r.comments?.totalCount ?? 0;
+							if (verdict) b.reviews += 1;
+							b.comments += comments;
+							botAcc.set(r.author.login, b);
+							const bm = mm.get(r.author.login) ?? { reviews: 0, comments: 0 };
+							if (verdict) bm.reviews += 1;
+							bm.comments += comments;
+							mm.set(r.author.login, bm);
+							botsOnPr.add(r.author.login);
+						}
+						for (const login of botsOnPr) botAcc.get(login)!.prs += 1;
+						// Human reviews only: bots review instantly and would skew latency.
+						const reviewNodes: any[] = submitted.filter((r: any) => r.author?.__typename !== 'Bot');
+						const times = reviewNodes.map((r) => r.submittedAt).sort();
+						// Gating approval = the LAST approval at/before merge, not the first:
+						// an early approve followed by more changes and a re-approve must keep
+						// the rework inside review time, not the post-approval wait.
+						const mergedMs = Date.parse(pr.mergedAt);
+						const approvals = reviewNodes
+							.filter((r) => r.state === 'APPROVED' && Date.parse(r.submittedAt) <= mergedMs)
+							.map((r) => r.submittedAt)
+							.sort();
+						const reviewers = [
+							...new Set(reviewNodes.map((r) => r.author?.login).filter(Boolean)),
+						] as string[];
+						out.push({
+							repo: `${owner}/${repo}`,
+							month,
+							createdAt: pr.createdAt,
+							mergedAt: pr.mergedAt,
+							firstReviewAt: times[0] ?? null,
+							approvedAt: approvals[approvals.length - 1] ?? null,
+							reviewers,
+						});
 					}
-					for (const login of botsOnPr) botAcc.get(login)!.prs += 1;
-					// Human reviews only: bots review instantly and would skew latency.
-					const reviewNodes: any[] = submitted.filter((r: any) => r.author?.__typename !== 'Bot');
-					const times = reviewNodes.map((r) => r.submittedAt).sort();
-					// Gating approval = the LAST approval at/before merge, not the first:
-					// an early approve followed by more changes and a re-approve must keep
-					// the rework inside review time, not the post-approval wait.
-					const mergedMs = Date.parse(pr.mergedAt);
-					const approvals = reviewNodes
-						.filter((r) => r.state === 'APPROVED' && Date.parse(r.submittedAt) <= mergedMs)
-						.map((r) => r.submittedAt)
-						.sort();
-					const reviewers = [...new Set(reviewNodes.map((r) => r.author?.login).filter(Boolean))] as string[];
-					out.push({
-						repo: `${owner}/${repo}`,
-						month,
-						createdAt: pr.createdAt,
-						mergedAt: pr.mergedAt,
-						firstReviewAt: times[0] ?? null,
-						approvedAt: approvals[approvals.length - 1] ?? null,
-						reviewers
-					});
-				}
-				})
+				}),
 			);
-		})
+		}),
 	);
 	const botActivity = [...botAcc.values()].sort(
-		(a, b) => b.reviews + b.comments - (a.reviews + a.comments)
+		(a, b) => b.reviews + b.comments - (a.reviews + a.comments),
 	);
 	const botByMonth: BotMonthActivity[] = [];
 	for (const [month, mm] of botMonth)
-		for (const [login, c] of mm) botByMonth.push({ month, login, reviews: c.reviews, comments: c.comments });
+		for (const [login, c] of mm)
+			botByMonth.push({
+				month,
+				login,
+				reviews: c.reviews,
+				comments: c.comments,
+			});
 	return { prs: out, botActivity, botByMonth };
 }

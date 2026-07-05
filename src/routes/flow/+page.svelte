@@ -5,6 +5,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { flow } from '$lib/client/flow.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
+	import { completeMonths } from '$lib/months';
 	import { AlertCircle, Loader2 } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 
@@ -21,6 +22,9 @@
 
 	const data = $derived(flow.data);
 	const o = $derived(data?.overall);
+	// Flow includes the in-progress month; charts only plot complete months so the
+	// latest point is never a partial-month stub.
+	const byMonth = $derived(completeMonths(data?.byMonth ?? []));
 
 	// Hours -> friendly duration.
 	const dur = (h: number | undefined | null) => {
@@ -80,14 +84,14 @@
 					<div class="font-display text-lg leading-none">Time to first review</div>
 					<div class="mt-1.5 text-xs text-[var(--color-ink-600)]">Median hours from open to first review, per month.</div>
 				</div>
-				<MetricChart data={data.byMonth} x="month" series={[{ key: 'firstReviewHours', label: 'Hours', color: 'var(--color-chart-3)' }]} kind="line" class="aspect-[5/2] w-full" />
+				<MetricChart data={byMonth} x="month" series={[{ key: 'firstReviewHours', label: 'Hours', color: 'var(--color-chart-3)' }]} kind="line" class="aspect-[5/2] w-full" />
 			</Card.Root>
 			<Card.Root class="gap-0 p-6 shadow-sm">
 				<div class="mb-4 border-b border-[var(--color-ink-200)] pb-3">
 					<div class="font-display text-lg leading-none">Cycle time</div>
 					<div class="mt-1.5 text-xs text-[var(--color-ink-600)]">Median hours from open to merge, per month.</div>
 				</div>
-				<MetricChart data={data.byMonth} x="month" series={[{ key: 'mergeHours', label: 'Hours', color: 'var(--color-chart-1)' }]} kind="line" class="aspect-[5/2] w-full" />
+				<MetricChart data={byMonth} x="month" series={[{ key: 'mergeHours', label: 'Hours', color: 'var(--color-chart-1)' }]} kind="line" class="aspect-[5/2] w-full" />
 			</Card.Root>
 		</section>
 
