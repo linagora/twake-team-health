@@ -193,7 +193,7 @@
 	const perRepoCfg = $derived(PER_REPO[activeCategory]);
 </script>
 
-<Topbar eyebrow="Charts" title="The charts." subtitle="Every metric drawn live from GitHub for {team?.name ?? 'your team'}.">
+<Topbar eyebrow="Charts" title="The charts." subtitle="Every delivery metric for {team?.name ?? 'your team'}, month by month.">
 	{#snippet actions()}
 		{#if stats}
 			<Button variant="outline" size="lg" onclick={exportPdf}>
@@ -212,7 +212,7 @@
 	{:else if !stats && metrics.loading}
 		<div class="flex items-center justify-center gap-3 py-32 text-[var(--color-ink-600)]">
 			<Loader2 class="h-5 w-5 animate-spin text-[var(--color-brand)]" />
-			<span class="text-sm">Fetching live metrics…</span>
+			<span class="text-sm">Loading metrics…</span>
 		</div>
 	{:else if stats}
 		<div class="grid grid-cols-12 gap-8">

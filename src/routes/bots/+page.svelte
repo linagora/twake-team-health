@@ -23,7 +23,7 @@
 <Topbar
 	eyebrow="Bots"
 	title="The robots."
-	subtitle="Automated review activity on {team?.name ?? 'your team'}'s merged PRs."
+	subtitle="Automated review activity on {team?.name ?? 'your team'}'s merged PRs over the last {scope.months} months."
 />
 
 <div class="px-4 py-6 sm:px-6 lg:px-10 lg:py-10">

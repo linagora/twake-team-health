@@ -210,7 +210,7 @@
 	{:else if !stats && metrics.loading}
 		<div class="flex items-center justify-center gap-3 py-32 text-[var(--color-ink-600)]">
 			<Loader2 class="h-5 w-5 animate-spin text-[var(--color-brand)]" />
-			<span class="text-sm">Fetching live metrics from GitHub…</span>
+			<span class="text-sm">Loading metrics…</span>
 		</div>
 	{:else if stats}
 		<!-- metadata strip -->
@@ -359,7 +359,7 @@
 					<div class="eyebrow mb-2">Standouts</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">The MVPs.</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
-						Who led the pack over the last {scope.memberMonths} months, one trophy per stat.
+						Who led the pack over the last {scope.memberMonths} months plus this month, one trophy per stat.
 					</p>
 				</div>
 				<div class="grid grid-cols-2 gap-4 sm:grid-cols-3">

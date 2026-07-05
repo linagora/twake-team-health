@@ -105,7 +105,7 @@ export const DEFAULT_TARGETS: Targets = {
 	minContributors: 3,
 	workloadMinTotal: 20,
 	recoveryStreakWarnWeeks: 8,
-	recoveryStreakBadWeeks: 12
+	recoveryStreakBadWeeks: 12,
 };
 
 /** Stable, order-independent key for a repo SET (FNV-1a, 32-bit hex). Lets a
@@ -135,7 +135,8 @@ const highIsBad = (v: number, warn: number, bad: number): SignalLevel =>
 const lowIsBad = (v: number, warn: number, bad: number): SignalLevel =>
 	v <= bad ? 'bad' : v <= warn ? 'warn' : 'ok';
 
-const dur = (h: number): string => (h >= 48 ? `${Math.round((h / 24) * 10) / 10}d` : `${Math.round(h)}h`);
+const dur = (h: number): string =>
+	h >= 48 ? `${Math.round((h / 24) * 10) / 10}d` : `${Math.round(h)}h`;
 
 /** Longest run of consecutive week ids (the set is unique; sorted defensively).
  * 1 for a single isolated active week, 0 for none. */
@@ -178,7 +179,7 @@ export function computeSignals(
 	flow: FlowResult | null,
 	attention: AttentionResult | null,
 	t: Targets = DEFAULT_TARGETS,
-	nowMonthKey: string = monthKeyOf()
+	nowMonthKey: string = monthKeyOf(),
 ): Signal[] {
 	const out: Signal[] = [];
 
@@ -189,16 +190,19 @@ export function computeSignals(
 		const completeMonths = [...flow.byMonth]
 			.filter((m) => m.month < nowMonthKey)
 			.sort((a, b) => a.month.localeCompare(b.month));
-		const trend = (pick: (m: (typeof completeMonths)[number]) => number, betterWhenLower: boolean) =>
-			trendOf(completeMonths.map(pick), betterWhenLower);
+		const trend = (
+			pick: (m: (typeof completeMonths)[number]) => number,
+			betterWhenLower: boolean,
+		) => trendOf(completeMonths.map(pick), betterWhenLower);
 		out.push({
 			id: 'first-review',
 			level: highIsBad(o.firstReviewHours, t.firstReviewWarnH, t.firstReviewBadH),
 			title: 'Time to first review',
 			value: dur(o.firstReviewHours),
 			target: `under ${t.firstReviewWarnH}h`,
-			detail: 'Median wait from opening a PR to its first review. Long waits stall everyone downstream.',
-			trend: trend((m) => m.firstReviewHours, true)
+			detail:
+				'Median wait from opening a PR to its first review. Long waits stall everyone downstream.',
+			trend: trend((m) => m.firstReviewHours, true),
 		});
 		out.push({
 			id: 'cycle-time',
@@ -207,7 +211,7 @@ export function computeSignals(
 			value: dur(o.mergeHours),
 			target: `under ${dur(t.cycleWarnH)}`,
 			detail: 'Median time from opening a PR to merging it.',
-			trend: trend((m) => m.mergeHours, true)
+			trend: trend((m) => m.mergeHours, true),
 		});
 		out.push({
 			id: 'review-coverage',
@@ -216,7 +220,7 @@ export function computeSignals(
 			value: `${o.reviewedPct}%`,
 			target: `at least ${t.reviewedWarnPct}%`,
 			detail: 'Share of merged PRs that got at least one review.',
-			trend: trend((m) => m.reviewedPct, false)
+			trend: trend((m) => m.reviewedPct, false),
 		});
 
 		// Bottleneck: which half of the cycle eats the most time. pickup + review
@@ -224,7 +228,7 @@ export function computeSignals(
 		// reviewHours is newer than some cached FlowResults; tolerate its absence.
 		const stages = [
 			{ name: 'waiting for the first review', h: o.firstReviewHours },
-			{ name: 'in review (first review to merge)', h: o.reviewHours ?? 0 }
+			{ name: 'in review (first review to merge)', h: o.reviewHours ?? 0 },
 		];
 		const top = stages.reduce((a, b) => (b.h > a.h ? b : a));
 		const sum = stages.reduce((s, x) => s + x.h, 0);
@@ -237,7 +241,7 @@ export function computeSignals(
 			target: `under ${dur(t.stageWarnH)}`,
 			detail: `Most reviewable PR time is spent ${top.name} (${share}% of the tracked stages).`,
 			// The slowest stage shrinking is an improvement, so lower is better.
-			trend: trend((m) => Math.max(m.firstReviewHours, m.reviewHours ?? 0), true)
+			trend: trend((m) => Math.max(m.firstReviewHours, m.reviewHours ?? 0), true),
 		});
 
 		// Throughput anomaly: the trailing 30 days against the median COMPLETE month
@@ -258,12 +262,12 @@ export function computeSignals(
 				level: highIsBad(dropPct, t.throughputDropWarnPct, t.throughputDropBadPct),
 				title: 'Merge throughput',
 				value: `${last} merged`,
-				target: `~${baseline} typical`,
+				target: `~${baseline}/month`,
 				detail:
 					dropPct > 0
 						? `${ranLabel} ${dropPct}% below the typical month.`
 						: `${okLabel} in line with recent months.`,
-				trend: trend((m) => m.count, false)
+				trend: trend((m) => m.count, false),
 			});
 		}
 
@@ -281,7 +285,7 @@ export function computeSignals(
 				detail: `Reviewing is concentrated on the busiest of ${flow.reviewerLoad.length} reviewers.`,
 				...(pct >= t.reviewShareWarnPct
 					? { people: [{ login: top.reviewer, note: `did ${pct}% of reviews` }] }
-					: {})
+					: {}),
 			});
 		}
 	}
@@ -295,7 +299,7 @@ export function computeSignals(
 			value: `${s.aging}`,
 			target: `under ${t.agingWarn}`,
 			detail: 'Open PRs that have been around too long.',
-			link: { href: '/attention?reason=aging', label: 'View open PRs' }
+			link: { href: '/attention?reason=aging', label: 'View open PRs' },
 		});
 		out.push({
 			id: 'stale-prs',
@@ -304,7 +308,7 @@ export function computeSignals(
 			value: `${s.stale}`,
 			target: `under ${t.staleWarn}`,
 			detail: 'Open PRs with no recent activity.',
-			link: { href: '/attention?reason=stale', label: 'View open PRs' }
+			link: { href: '/attention?reason=stale', label: 'View open PRs' },
 		});
 		out.push({
 			id: 'unreviewed-prs',
@@ -313,7 +317,7 @@ export function computeSignals(
 			value: `${s.unreviewed}`,
 			target: `under ${t.unreviewedWarn}`,
 			detail: 'Open PRs still waiting for a first review.',
-			link: { href: '/attention?reason=unreviewed', label: 'View open PRs' }
+			link: { href: '/attention?reason=unreviewed', label: 'View open PRs' },
 		});
 	}
 
@@ -335,7 +339,11 @@ export function computeSignals(
 			if (e.total < t.busMinCommits) continue;
 			const pct = Math.round((e.top / e.total) * 100);
 			if (pct >= t.busShareWarnPct && e.topAuthor) {
-				concentratedList.push({ login: e.topAuthor, note: `wrote ${pct}% of the team's commits to ${repo}`, pct });
+				concentratedList.push({
+					login: e.topAuthor,
+					note: `wrote ${pct}% of the team's commits to ${repo}`,
+					pct,
+				});
 			}
 		}
 		concentratedList.sort((a, b) => b.pct - a.pct);
@@ -349,7 +357,9 @@ export function computeSignals(
 			detail: concentrated
 				? `${concentrated} ${concentrated === 1 ? 'repository depends' : 'repositories depend'} on a single maintainer.`
 				: 'No single-maintainer repositories detected.',
-			...(concentrated ? { people: concentratedList.map(({ login, note }) => ({ login, note })) } : {})
+			...(concentrated
+				? { people: concentratedList.map(({ login, note }) => ({ login, note })) }
+				: {}),
 		});
 	}
 
@@ -369,7 +379,11 @@ export function computeSignals(
 			const parts: string[] = [];
 			if (wkLevel !== 'ok') parts.push(`${wkPct}% on weekends`);
 			if (lnLevel !== 'ok') parts.push(`${lnPct}% late at night`);
-			flagged.push({ login: w.author, note: `${parts.join(', ')} (of ${w.commits} commits)`, level });
+			flagged.push({
+				login: w.author,
+				note: `${parts.join(', ')} (of ${w.commits} commits)`,
+				level,
+			});
 		}
 		// Sorted most-severe first, so the worst person's level is the signal's level.
 		flagged.sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level]);
@@ -382,7 +396,7 @@ export function computeSignals(
 			detail: flagged.length
 				? `${flagged.length === 1 ? 'Someone is' : `${flagged.length} people are`} committing heavily on weekends or late at night.`
 				: 'No outsized weekend or late-night commit patterns.',
-			...(flagged.length ? { people: flagged.map(({ login, note }) => ({ login, note })) } : {})
+			...(flagged.length ? { people: flagged.map(({ login, note }) => ({ login, note })) } : {}),
 		});
 
 		// Recovery deficit: members who committed week after week with no quiet week.
@@ -405,7 +419,7 @@ export function computeSignals(
 			detail: noBreak.length
 				? `${noBreak.length === 1 ? 'Someone has' : `${noBreak.length} people have`} committed week after week with no break.`
 				: 'No long unbroken commit streaks.',
-			...(noBreak.length ? { people: noBreak.map(({ login, note }) => ({ login, note })) } : {})
+			...(noBreak.length ? { people: noBreak.map(({ login, note }) => ({ login, note })) } : {}),
 		});
 	}
 
@@ -416,7 +430,8 @@ export function computeSignals(
 	// since a merged PR's own commits are already in this tally.
 	if (metrics && metrics.authors.length) {
 		const commits = new Map<string, number>();
-		for (const a of metrics.authors) commits.set(a.author, (commits.get(a.author) ?? 0) + a.commits);
+		for (const a of metrics.authors)
+			commits.set(a.author, (commits.get(a.author) ?? 0) + a.commits);
 		const total = [...commits.values()].reduce((s, n) => s + n, 0);
 		if (commits.size >= t.minContributors && total >= t.workloadMinTotal) {
 			const [topAuthor, topCommits] = [...commits].reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -430,7 +445,7 @@ export function computeSignals(
 				detail: `Commits are concentrated on the busiest of ${commits.size} contributors.`,
 				...(pct >= t.workloadShareWarnPct
 					? { people: [{ login: topAuthor, note: `wrote ${pct}% of the team's commits` }] }
-					: {})
+					: {}),
 			});
 		}
 	}
