@@ -11,6 +11,7 @@
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { repoKey, parseList } from '$lib/client/selection';
 	import { replaceSearchParams } from '$lib/client/url';
+	import { completeMonths } from '$lib/months';
 	import { orgTrend, type OrgMonth } from '$lib/charts';
 	import { pluralize } from '$lib/utils';
 	import type { Repo } from '$lib/server/github/types';
@@ -93,7 +94,7 @@
 	const filtered = $derived(
 		globalMetrics.data ? globalMetrics.data.repos.filter((r) => selectedKeys.has(repoKey(r))) : []
 	);
-	const trend = $derived<OrgMonth[]>(orgTrend(filtered));
+	const trend = $derived<OrgMonth[]>(orgTrend(completeMonths(filtered)));
 	const presentRepos = $derived(new Set(filtered.map(repoKey)).size);
 
 	const scopeLabel = $derived.by(() => {

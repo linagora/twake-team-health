@@ -94,15 +94,30 @@
 		if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
 	}
 
+	// Charts only plot complete months: the report's data runs through today (the
+	// in-progress month is a real bucket, counted by totals/signals), but a
+	// partial month would draw as a misleading dip at the end of every series.
+	const chartStats = $derived(
+		stats
+			? {
+					...stats,
+					repos: completeMonths(stats.repos),
+					authors: completeMonths(stats.authors),
+					mergedByAuthor: completeMonths(stats.mergedByAuthor),
+					issuesByMonth: completeMonths(stats.issuesByMonth)
+				}
+			: null
+	);
+
 	// Only one category renders at a time, so compute each transform lazily — eagerly
 	// running all six (the member-heavy ones especially) is what froze navigation in.
 	const EMPTY_MEMBER = { months: [] as string[], data: [], members: [] as string[] };
-	const repos = $derived(stats && PER_REPO[activeCategory] ? repoSeries(stats.repos) : []);
-	const commits = $derived(stats && activeCategory === 'Commits' ? commitsChart(stats, config) : EMPTY_MEMBER);
-	const merged = $derived(stats && activeCategory === 'MergedPRs' ? mergedPrChart(stats, config) : EMPTY_MEMBER);
-	const reviews = $derived(stats && activeCategory === 'Reviews' ? reviewActivityChart(stats, config) : []);
-	const tickets = $derived(stats && activeCategory === 'Tickets' ? ticketsChart(stats) : []);
-	const commitsByRepo = $derived(stats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(stats, config) : { repos: [], data: [], members: [] });
+	const repos = $derived(chartStats && PER_REPO[activeCategory] ? repoSeries(chartStats.repos) : []);
+	const commits = $derived(chartStats && activeCategory === 'Commits' ? commitsChart(chartStats, config) : EMPTY_MEMBER);
+	const merged = $derived(chartStats && activeCategory === 'MergedPRs' ? mergedPrChart(chartStats, config) : EMPTY_MEMBER);
+	const reviews = $derived(chartStats && activeCategory === 'Reviews' ? reviewActivityChart(chartStats, config) : []);
+	const tickets = $derived(chartStats && activeCategory === 'Tickets' ? ticketsChart(chartStats) : []);
+	const commitsByRepo = $derived(chartStats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(chartStats, config) : { repos: [], data: [], members: [] });
 
 	// Team-wide flow metrics over time, drawn from the flow report (not the metrics
 	// report). Loaded lazily when one of these categories is active.
@@ -163,7 +178,7 @@
 			series: [{ key: 'mergeRate', label: '% merged', color: 'var(--color-chart-1)' }]
 		}
 	};
-	const orgMonths = $derived(stats && ORG[activeCategory] ? orgTrend(stats.repos) : []);
+	const orgMonths = $derived(chartStats && ORG[activeCategory] ? orgTrend(chartStats.repos) : []);
 
 	// Map a set of keys to colored series; `label` formats the displayed name.
 	function keySeries(keys: string[], label: (k: string) => string = (k) => k): SeriesCfg[] {

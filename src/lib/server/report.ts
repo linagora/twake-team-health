@@ -1,9 +1,11 @@
 // Report orchestrator over the fact store. Facts are synced per repo (watermark
 // model, see sync.ts), read once, and aggregated at read time into:
-//   - calendar-month series over COMPLETE months only (the in-progress month is
-//     never bucketed, so charts have no stub bar in the first days of a month),
+//   - calendar-month buckets covering the full requested window THROUGH TODAY
+//     (the in-progress month is an extra bucket; charts drop it at render time
+//     via completeMonths so they never show a stub bar, while sums, signals and
+//     leaderboards keep it so nothing is cut off at a month boundary),
 //   - rolling trailing-30d headline + per-member numbers (window30d /
-//     recentMembers), which never collapse at a month boundary.
+//     recentMembers), which always span a full 30 days.
 // With no DATABASE_URL it falls back to fetching facts live on every request.
 import { graphql, type GraphQL } from './github/client';
 import { monthsEndingAt, monthEnd, type Month } from './github/months';
@@ -15,14 +17,15 @@ import * as store from './store';
 import { ensureFactsSynced, fetchFactBundleLive } from './sync';
 import { hasDb } from './db';
 import { getAppSettings } from './app-config';
-import { dayOf, dayStartMs, addDays, lastCompleteMonthKey, WINDOW_DAYS } from './days';
+import { dayOf, dayStartMs, addDays, WINDOW_DAYS } from './days';
 import { monthKeyOf } from '$lib/months';
 import type { Selection, MetricsResult, FactBundle } from './github/types';
 
 export type ReportShape = {
-	/** Complete months for the repo series, ascending. */
+	/** Repo-series buckets, ascending: N complete months + the in-progress month
+	 * on rolling selections (charts drop the partial bucket client-side). */
 	months: Month[];
-	/** Complete months for the member/review series, ascending. */
+	/** Member/review-series buckets, ascending (same rule). */
 	memberMonths: Month[];
 	/** Rolling windows end here (today, or the historical `to` month's end). */
 	windowEndDay: string;
@@ -40,14 +43,18 @@ export type ReportShape = {
  */
 export function resolveReportShape(selection: Selection, now: Date): ReportShape {
 	const current = monthKeyOf(now);
-	// An explicit historical `to` is honored as-is; a rolling selection (or a
-	// `to` pointing at the in-progress month) ends at the last complete month.
-	const endKey = selection.to && selection.to < current ? selection.to : lastCompleteMonthKey(now);
-	const months = monthsEndingAt(endKey, selection.months);
-	const memberMonths = monthsEndingAt(endKey, Math.min(selection.memberMonths, selection.months));
+	const historical = selection.to !== undefined && selection.to < current;
+	// Rolling selections bucket the requested N COMPLETE months PLUS the
+	// in-progress month as an extra bucket: sums, signals, and leaderboards see
+	// data through today, while charts drop the partial bucket at render time
+	// (completeMonths), so no surface is cut off and no chart shows a stub bar.
+	// An explicit historical `to` is honored as-is (all its months are complete).
+	const endKey = historical ? selection.to! : current;
+	const extra = historical ? 0 : 1;
+	const months = monthsEndingAt(endKey, selection.months + extra);
+	const memberMonths = monthsEndingAt(endKey, Math.min(selection.memberMonths, selection.months) + extra);
 
 	const todayDay = dayOf(now);
-	const historical = selection.to !== undefined && selection.to < current;
 	const windowEndDay = historical ? monthEnd(months[months.length - 1]) : todayDay;
 	// The previous rolling window reaches 2N-1 days back from its end.
 	const windowStartDay = addDays(windowEndDay, -(2 * WINDOW_DAYS - 1));

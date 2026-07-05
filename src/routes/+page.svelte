@@ -8,6 +8,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
+	import { completeMonths } from '$lib/months';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, RefreshCw, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { computeAwards } from '$lib/awards';
@@ -31,9 +32,11 @@
 		breadth: Compass
 	};
 
+	// Chart series only: complete months (the in-progress bucket is dropped here,
+	// NOT from the data — window totals and leaderboards below include it).
 	const totalMonthly = $derived.by(() => {
 		const byMonth = new Map<string, { created: number; merged: number; bugs: number; issues: number }>();
-		for (const r of stats?.repos ?? []) {
+		for (const r of completeMonths(stats?.repos ?? [])) {
 			const m = byMonth.get(r.month) ?? { created: 0, merged: 0, bugs: 0, issues: 0 };
 			m.created += r.created;
 			m.merged += r.merged;

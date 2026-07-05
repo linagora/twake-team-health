@@ -7,6 +7,7 @@
 	import { globalMetrics } from '$lib/client/metrics.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { orgTrend, type OrgMonth } from '$lib/charts';
+	import { completeMonths } from '$lib/months';
 	import { AlertCircle, Loader2, FileDown } from '@lucide/svelte';
 
 	let { data } = $props();
@@ -18,7 +19,7 @@
 		}
 	});
 
-	const trend = $derived<OrgMonth[]>(globalMetrics.data ? orgTrend(globalMetrics.data.repos) : []);
+	const trend = $derived<OrgMonth[]>(globalMetrics.data ? orgTrend(completeMonths(globalMetrics.data.repos)) : []);
 </script>
 
 <Topbar
