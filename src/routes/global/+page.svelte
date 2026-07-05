@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Topbar from '$lib/components/Topbar.svelte';
+	import Stat from '$lib/components/Stat.svelte';
 	import OrgTrendView from '$lib/components/OrgTrendView.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
@@ -20,6 +21,11 @@
 	});
 
 	const trend = $derived<OrgMonth[]>(globalMetrics.data ? orgTrend(completeMonths(globalMetrics.data.repos)) : []);
+
+	// Rolling last-30-days headline for the whole org, so this page reflects
+	// today even though its trend charts plot complete months.
+	const win = $derived(globalMetrics.data?.window30d ?? null);
+	const pct = (cur: number, prev: number) => (prev === 0 ? 0 : ((cur - prev) / prev) * 100);
 </script>
 
 <Topbar
@@ -48,6 +54,14 @@
 			<span class="text-sm">Aggregating organization-wide metrics…</span>
 		</div>
 	{:else if trend.length}
+		{#if win}
+			<section class="mb-12 grid grid-cols-2 gap-x-6 gap-y-8 border-b border-[var(--color-ink-300)] pb-10 lg:grid-cols-4">
+				<Stat label="PRs merged · last 30 days" value={win.current.merged} trend={pct(win.current.merged, win.previous.merged)} hint="vs. previous 30 days" size="lg" />
+				<Stat label="PRs opened" value={win.current.created} trend={pct(win.current.created, win.previous.created)} size="md" />
+				<Stat label="Issues raised" value={win.current.issues} trend={pct(win.current.issues, win.previous.issues)} size="md" />
+				<Stat label="Bugs raised" value={win.current.bugs} trend={pct(win.current.bugs, win.previous.bugs)} size="md" />
+			</section>
+		{/if}
 		<OrgTrendView {trend} />
 	{/if}
 </div>
