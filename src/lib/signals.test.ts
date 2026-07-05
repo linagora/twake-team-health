@@ -97,6 +97,37 @@ describe('computeSignals', () => {
 		expect(find(sig, 'throughput-drop')?.level).toBe('bad');
 	});
 
+	it('prefers the rolling last-30-days window when metrics carry one (current through today)', () => {
+		// Complete-months median = 10; the trailing 30 days merged only 2 -> 80% drop
+		// flagged NOW, without waiting for the month to close.
+		const metrics = {
+			...metricsWith([]),
+			window30d: {
+				current: { created: 3, merged: 2, bugs: 0, issues: 0 },
+				previous: { created: 12, merged: 11, bugs: 0, issues: 0 },
+				computedAt: 1
+			}
+		};
+		const sig = computeSignals(metrics, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-04');
+		const s = find(sig, 'throughput-drop');
+		expect(s?.value).toBe('2 merged');
+		expect(s?.level).toBe('bad');
+		expect(s?.detail).toContain('last 30 days');
+	});
+
+	it('a healthy rolling window is not flagged', () => {
+		const metrics = {
+			...metricsWith([]),
+			window30d: {
+				current: { created: 12, merged: 10, bugs: 0, issues: 0 },
+				previous: { created: 11, merged: 9, bugs: 0, issues: 0 },
+				computedAt: 1
+			}
+		};
+		const sig = computeSignals(metrics, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.level).toBe('ok');
+	});
+
 	it('flags aging/stale/unreviewed PRs from the attention summary', () => {
 		const sig = computeSignals(null, null, attentionWith({ aging: 9, stale: 0, unreviewed: 5 }));
 		expect(find(sig, 'aging-prs')?.level).toBe('bad');

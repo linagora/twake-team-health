@@ -240,13 +240,19 @@ export function computeSignals(
 			trend: trend((m) => Math.max(m.firstReviewHours, m.reviewHours ?? 0), true)
 		});
 
-		// Throughput anomaly: the last completed month vs the median of the months
-		// before it. Exclude only the current (partial) calendar month — for a
-		// historical window the final month is complete and must be kept.
+		// Throughput anomaly: the trailing 30 days against the median COMPLETE month
+		// — both are ~30-day periods, so the comparison is like-for-like while
+		// staying current through today (no waiting for the month to close). When
+		// the rolling window isn't available (no metrics, e.g. flow-only callers),
+		// fall back to the last complete month vs the median of the months before it.
 		if (completeMonths.length >= 3) {
-			const last = completeMonths[completeMonths.length - 1].count;
-			const baseline = median(completeMonths.slice(0, -1).map((m) => m.count));
+			const rolling = metrics?.window30d?.current.merged;
+			const last = rolling ?? completeMonths[completeMonths.length - 1].count;
+			const baselineMonths = rolling !== undefined ? completeMonths : completeMonths.slice(0, -1);
+			const baseline = median(baselineMonths.map((m) => m.count));
 			const dropPct = baseline > 0 ? Math.round(((baseline - last) / baseline) * 100) : 0;
+			const ranLabel = rolling !== undefined ? 'The last 30 days ran' : 'Last full month was';
+			const okLabel = rolling !== undefined ? 'The last 30 days are' : 'Last full month is';
 			out.push({
 				id: 'throughput-drop',
 				level: highIsBad(dropPct, t.throughputDropWarnPct, t.throughputDropBadPct),
@@ -255,8 +261,8 @@ export function computeSignals(
 				target: `~${baseline} typical`,
 				detail:
 					dropPct > 0
-						? `Last full month was ${dropPct}% below the recent median.`
-						: 'Last full month is in line with recent months.',
+						? `${ranLabel} ${dropPct}% below the typical month.`
+						: `${okLabel} in line with recent months.`,
 				trend: trend((m) => m.count, false)
 			});
 		}
