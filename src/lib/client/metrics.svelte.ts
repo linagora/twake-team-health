@@ -34,15 +34,17 @@ class MetricsStore extends Resource<MetricsResult> {
 export const metrics = new MetricsStore();
 export const globalMetrics = new MetricsStore();
 
-/** Force a full data refresh for a selection: refetch the fact tail from GitHub
- * now, recompute the report, and return it fresh. Backs the manual "Refresh"
- * button so a user needn't wait for the warm cron or the cache TTL. */
-export async function forceRefresh(selection: Selection): Promise<MetricsResult> {
-	const res = await postJson('/api/refresh', selection);
+export type RefreshKind = 'metrics' | 'flow' | 'attention';
+
+/** Force a data refresh for a selection: refetch the fact tail from GitHub now
+ * and recompute + re-cache the given report kinds server-side. Callers reload
+ * their stores afterwards to pick up the fresh cache. Backs the topbar Refresh
+ * so it is never a no-op against a warm cache. */
+export async function forceRefresh(selection: Selection, kinds: RefreshKind[]): Promise<void> {
+	const res = await postJson('/api/refresh', { ...selection, kinds });
 	if (res.status === 401) {
 		redirectToSignIn();
 		throw new Error('unauthorized');
 	}
 	if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 200)}`);
-	return (await res.json()) as MetricsResult;
 }

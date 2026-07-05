@@ -289,3 +289,47 @@ export async function readFlowFacts(
 	) as ReviewFact[];
 	return { prs, reviews };
 }
+
+// --- sync tooling (admin visibility + full re-sync) ----------------------------
+
+export type RepoSyncStatus = RepoSyncRow & {
+	prFacts: number;
+	commitFacts: number;
+	reviewFacts: number;
+};
+
+/** Every repo watermark plus its fact counts, for the admin sync panel. */
+export async function getSyncStatus(): Promise<RepoSyncStatus[]> {
+	const countsBy = async (table: typeof prFact | typeof commitFact | typeof reviewFact) => {
+		const rows = await db()
+			.select({ owner: table.owner, repo: table.repo, n: sql<number>`count(*)::int` })
+			.from(table)
+			.groupBy(table.owner, table.repo);
+		return new Map(rows.map((r) => [`${r.owner}/${r.repo}`, r.n]));
+	};
+	const [syncRows, prs, commits, reviews] = await Promise.all([
+		db().select().from(repoSync),
+		countsBy(prFact),
+		countsBy(commitFact),
+		countsBy(reviewFact),
+	]);
+	return syncRows
+		.map((r) => {
+			const k = `${r.owner}/${r.repo}`;
+			return {
+				...r,
+				prFacts: prs.get(k) ?? 0,
+				commitFacts: commits.get(k) ?? 0,
+				reviewFacts: reviews.get(k) ?? 0,
+			};
+		})
+		.sort((a, b) => `${a.owner}/${a.repo}`.localeCompare(`${b.owner}/${b.repo}`));
+}
+
+/** Drop a repo's watermark so its whole history is refetched from scratch (the
+ * facts stay; the id/number-keyed upserts rewrite them in place). */
+export async function deleteRepoSync(repo: Repo): Promise<void> {
+	await db()
+		.delete(repoSync)
+		.where(and(eq(repoSync.owner, repo.owner), eq(repoSync.repo, repo.repo)));
+}
