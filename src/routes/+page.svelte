@@ -8,7 +8,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
-	import { completeMonths } from '$lib/months';
+	import { monthKeyOf } from '$lib/months';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, RefreshCw, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { computeAwards } from '$lib/awards';
@@ -32,11 +32,14 @@
 		breadth: Compass
 	};
 
-	// Chart series only: complete months (the in-progress bucket is dropped here,
-	// NOT from the data — window totals and leaderboards below include it).
-	const totalMonthly = $derived.by(() => {
+	// The report's buckets run through today; the in-progress month is real data.
+	// `allMonthly` keeps it (bar chart renders it as a distinct month-to-date bar);
+	// `totalMonthly` drops it for the series where a partial point would mislead
+	// (sparklines, hero fallback and its month-over-month trends).
+	const currentMonthKey = monthKeyOf();
+	const allMonthly = $derived.by(() => {
 		const byMonth = new Map<string, { created: number; merged: number; bugs: number; issues: number }>();
-		for (const r of completeMonths(stats?.repos ?? [])) {
+		for (const r of stats?.repos ?? []) {
 			const m = byMonth.get(r.month) ?? { created: 0, merged: 0, bugs: 0, issues: 0 };
 			m.created += r.created;
 			m.merged += r.merged;
@@ -46,6 +49,7 @@
 		}
 		return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 	});
+	const totalMonthly = $derived(allMonthly.filter(([month]) => month < currentMonthKey));
 
 	const totals = $derived.by(() => {
 		const empty = { created: 0, merged: 0, bugs: 0, issues: 0 };
@@ -386,28 +390,38 @@
 		{/if}
 
 		<!-- Cadence -->
-		{#if totalMonthly.length > 0}
-			{@const maxBar = Math.max(...totalMonthly.map(([, v]) => v.merged), 1)}
+		{#if allMonthly.length > 0}
+			{@const maxBar = Math.max(...allMonthly.map(([, v]) => v.merged), 1)}
 			<section class="mt-16">
 				<div class="mb-6">
 					<div class="eyebrow mb-2">Pull requests merged · per month</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Merged PRs, month by month</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
 						Each bar is the number of pull requests the team merged that month — taller means more shipped.
+						The dimmed last bar is the current month so far.
 					</p>
 				</div>
 				<Card.Root class="p-8 shadow-sm">
 					<div class="flex items-end justify-between gap-2 h-52 border-b border-[var(--color-ink-200)]">
-						{#each totalMonthly as [month, v] (month)}
-							<div class="flex-1 flex flex-col items-center gap-1.5 group cursor-default">
-								<div class="font-mono tabular text-[11px] text-[var(--color-ink-700)] group-hover:text-[var(--color-ink-950)]">{v.merged}</div>
-								<div class="w-full bg-[var(--color-brand)]/80 rounded-t-sm transition-all group-hover:bg-[var(--color-brand)]" style:height={`${Math.max((v.merged / maxBar) * 150, 2)}px`}></div>
+						{#each allMonthly as [month, v] (month)}
+							{@const mtd = month === currentMonthKey}
+							<div class="flex-1 flex flex-col items-center gap-1.5 group cursor-default" title={mtd ? `${fmtMonth(month)} — month to date` : fmtMonth(month)}>
+								<div class="font-mono tabular text-[11px] {mtd ? 'text-[var(--color-ink-500)]' : 'text-[var(--color-ink-700)]'} group-hover:text-[var(--color-ink-950)]">{v.merged}</div>
+								<div
+									class="w-full rounded-t-sm transition-all {mtd
+										? 'bg-[var(--color-brand)]/30 border border-b-0 border-dashed border-[var(--color-brand)]/60 group-hover:bg-[var(--color-brand)]/40'
+										: 'bg-[var(--color-brand)]/80 group-hover:bg-[var(--color-brand)]'}"
+									style:height={`${Math.max((v.merged / maxBar) * 150, 2)}px`}
+								></div>
 							</div>
 						{/each}
 					</div>
 					<div class="flex justify-between gap-2 pt-2">
-						{#each totalMonthly as [month] (month)}
-							<div class="flex-1 text-center text-[10px] font-mono uppercase tracking-wider text-[var(--color-ink-600)]">{fmtMonth(month)}</div>
+						{#each allMonthly as [month] (month)}
+							{@const mtd = month === currentMonthKey}
+							<div class="flex-1 text-center text-[10px] font-mono uppercase tracking-wider {mtd ? 'text-[var(--color-ink-500)]' : 'text-[var(--color-ink-600)]'}">
+								{fmtMonth(month)}{#if mtd}<span class="block text-[8px] tracking-widest text-[var(--color-brand)]">MTD</span>{/if}
+							</div>
 						{/each}
 					</div>
 				</Card.Root>
