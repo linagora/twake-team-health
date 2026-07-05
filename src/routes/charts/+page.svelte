@@ -18,6 +18,7 @@
 	import type { AppConfig } from '$lib/server/config';
 	import { Button } from '$lib/components/ui/button';
 	import { fmtMonth } from '$lib/utils';
+	import { completeMonths } from '$lib/months';
 	import { AlertCircle, Loader2, FileDown } from '@lucide/svelte';
 
 	const stats = $derived(metrics.data);
@@ -117,11 +118,13 @@
 		if (NEEDS_FLOW(activeCategory) && team?.repos.length)
 			flow.ensure(team.repos, scope.months, scope.to || undefined);
 	});
-	const flowMonths = $derived(flow.data?.byMonth ?? []);
+	// Flow fetches live and includes the in-progress month; drop it so the latest
+	// point is always a complete month (no stub dip at the start of a month).
+	const flowMonths = $derived(completeMonths(flow.data?.byMonth ?? []));
 
 	// Pivot per-bot monthly rows into one row per month with a column per bot.
 	function botPivot(field: 'comments' | 'reviews') {
-		const rows = flow.data?.botByMonth ?? [];
+		const rows = completeMonths(flow.data?.botByMonth ?? []);
 		const logins = [...new Set(rows.map((r) => r.login))];
 		const byMonth = new Map<string, Record<string, number | string>>();
 		for (const r of rows) {

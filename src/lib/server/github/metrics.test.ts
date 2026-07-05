@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
 	prStatsForMonth,
 	issueStatsForMonth,
-	reviewCountsFromNodes,
 	pickCommitMember,
 	commitLocalTime,
 	classifyCommitTime,
@@ -131,36 +130,8 @@ describe('issueStatsForMonth', () => {
 	});
 });
 
-describe('reviewCountsFromNodes', () => {
-	const start = Date.parse('2026-05-01T00:00:00Z');
-	const end = Date.parse('2026-05-31T23:59:59Z');
-	it('counts reviews/comments per reviewer, excludes self, PENDING and out-of-window', () => {
-		const prs = [
-			{
-				author: { login: 'alice' },
-				reviews: {
-					nodes: [
-						{ author: { login: 'bob' }, submittedAt: '2026-05-10T00:00:00Z', state: 'APPROVED' },
-						{ author: { login: 'alice' }, submittedAt: '2026-05-10T00:00:00Z', state: 'COMMENTED' }, // self
-						{ author: { login: 'bob' }, submittedAt: '2026-05-10T00:00:00Z', state: 'PENDING' }, // pending
-						{ author: { login: 'carol' }, submittedAt: '2026-04-10T00:00:00Z', state: 'APPROVED' } // out of window
-					]
-				},
-				comments: {
-					nodes: [
-						{ author: { login: 'bob' }, createdAt: '2026-05-12T00:00:00Z' },
-						{ author: { login: 'stranger' }, createdAt: '2026-05-12T00:00:00Z' }
-					]
-				}
-			}
-		];
-		const counts = reviewCountsFromNodes(prs, start, end);
-		expect(counts.get('bob')).toEqual({ reviews: 1, comments: 1 }); // 1 valid review (pending excluded), 1 comment
-		expect(counts.has('alice')).toBe(false); // self-review excluded
-		expect(counts.has('carol')).toBe(false); // out of window
-		expect(counts.get('stranger')).toEqual({ reviews: 0, comments: 1 }); // every reviewer kept (no Others bucketing here)
-	});
-});
+// Review counting semantics (self-exclusion, PENDING, windows) are covered by
+// store/aggregate.test.ts against review facts.
 
 describe('pickCommitMember', () => {
 	const byLogin = new Map([['alice', 'alice']]);

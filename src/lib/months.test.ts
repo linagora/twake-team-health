@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { isMonthKey, monthKeyOf, addMonths, monthCount, monthList, recentMonthKeys } from './months';
+import {
+	isMonthKey,
+	monthKeyOf,
+	addMonths,
+	monthCount,
+	monthList,
+	recentMonthKeys,
+	completeMonths,
+} from './months';
 
 describe('month key helpers', () => {
 	it('validates YYYY-MM keys', () => {
@@ -41,5 +49,27 @@ describe('month key helpers', () => {
 		const now = new Date('2026-06-15T00:00:00Z');
 		expect(recentMonthKeys(3, now)).toEqual(['2026-04', '2026-05', '2026-06']);
 		expect(recentMonthKeys(1, now)).toEqual(['2026-06']);
+	});
+});
+
+describe('completeMonths', () => {
+	const now = new Date('2026-07-03T09:00:00Z'); // early July: June complete, July partial
+
+	it('drops the in-progress calendar month', () => {
+		const rows = [{ month: '2026-05' }, { month: '2026-06' }, { month: '2026-07' }];
+		expect(completeMonths(rows, now).map((r) => r.month)).toEqual(['2026-05', '2026-06']);
+	});
+
+	it('is a no-op for a historical series that ends before the current month', () => {
+		const rows = [{ month: '2026-03' }, { month: '2026-04' }];
+		expect(completeMonths(rows, now)).toEqual(rows);
+	});
+
+	it('keeps extra fields on the rows', () => {
+		const rows = [
+			{ month: '2026-06', merged: 5 },
+			{ month: '2026-07', merged: 1 },
+		];
+		expect(completeMonths(rows, now)).toEqual([{ month: '2026-06', merged: 5 }]);
 	});
 });

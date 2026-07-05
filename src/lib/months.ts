@@ -50,3 +50,14 @@ export function recentMonthKeys(n: number, now: Date = new Date()): string[] {
 	const end = monthKeyOf(now);
 	return monthList(addMonths(end, -(n - 1)), end);
 }
+
+/** Drop the in-progress calendar month from a month-keyed series so charts only
+ * plot complete months (no stub bar in the first days of a month). A historical
+ * window already ends before the current month, so this is a no-op there. */
+export function completeMonths<T extends { month: string }>(
+	rows: T[],
+	now: Date = new Date(),
+): T[] {
+	const current = monthKeyOf(now);
+	return rows.filter((r) => r.month < current);
+}

@@ -1,16 +1,32 @@
-import { and, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { repoMonth, memberRepoMonth, reviewRepoMonth } from '../db/schema';
-import type { Repo, RepoMonth } from '../github/types';
-import type { MemberRepoMonthRow, ReviewRepoMonthRow } from './assemble';
+import {
+	prFact,
+	issueFact,
+	commitFact,
+	reviewFact,
+	releaseFact,
+	repoStockDay,
+	repoSync,
+} from '../db/schema';
+import type {
+	Repo,
+	PrFact,
+	IssueFact,
+	CommitFact,
+	ReviewFact,
+	ReleaseFact,
+	StockDay,
+	RepoSyncRow,
+	FactBundle,
+} from '../github/types';
 
 const uniq = <T>(xs: T[]) => [...new Set(xs)];
 const repoSet = (repos: Repo[]) => new Set(repos.map((r) => `${r.owner}/${r.repo}`));
 const owners = (repos: Repo[]) => uniq(repos.map((r) => r.owner));
 const repoNames = (repos: Repo[]) => uniq(repos.map((r) => r.repo));
-// Postgres caps a statement at 65535 bind parameters; a big team's member grid
-// (members x repos x months) can exceed that, so inserts are batched. Sizes leave
-// headroom for each table's column count.
+// Postgres caps a statement at 65535 bind parameters, so inserts are batched.
+// Sizes leave headroom for each table's column count.
 const chunk = <T>(xs: T[], n: number): T[][] => {
 	const out: T[][] = [];
 	for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
@@ -19,175 +35,212 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
 // On-conflict updates copy from the row we tried to insert ("excluded").
 const sqlExcluded = (col: string) => sql.raw(`excluded.${col}`);
 
-// fetched_at is internal cache metadata; strip it from rows returned for reports
-// so it never leaks into the API payload.
-function stripFetchedAt<T extends { fetchedAt?: unknown }>(rows: T[]): T[] {
-	return rows.map((r) => {
-		const copy = { ...r };
-		delete (copy as { fetchedAt?: unknown }).fetchedAt;
-		return copy;
-	});
-}
-
-// --- repo_month ---
-async function selectRepoMonthRows(repos: Repo[], months: string[]) {
-	if (!repos.length || !months.length) return [];
+// The owner/repo IN-list pair over-matches cross products (owner A × repo B),
+// so every read filters back down to the exact requested repo set.
+const filterRepos = <T extends { owner: string; repo: string }>(rows: T[], repos: Repo[]): T[] => {
 	const want = repoSet(repos);
-	const rows = await db()
-		.select()
-		.from(repoMonth)
-		.where(
-			and(
-				inArray(repoMonth.owner, owners(repos)),
-				inArray(repoMonth.repo, repoNames(repos)),
-				inArray(repoMonth.month, months)
-			)
-		);
 	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
-}
+};
 
-export async function getRepoMonths(repos: Repo[], months: string[]): Promise<RepoMonth[]> {
-	return stripFetchedAt(await selectRepoMonthRows(repos, months));
-}
+// --- fact upserts (idempotent; refetching a range re-seen is a no-op) --------
 
-/** Repo rows for a report plus the `${owner}/${repo}::${month}` → fetched_at map
- * that drives staleness, both from a single query (avoids a separate fetched_at
- * read on the warm path). */
-export async function getRepoMonthsWithFetchedAt(
-	repos: Repo[],
-	months: string[]
-): Promise<{ rows: RepoMonth[]; fetchedAt: Map<string, Date> }> {
-	const raw = await selectRepoMonthRows(repos, months);
-	const fetchedAt = new Map<string, Date>();
-	for (const r of raw) fetchedAt.set(`${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
-	return { rows: stripFetchedAt(raw), fetchedAt };
-}
-
-export async function upsertRepoMonths(rows: RepoMonth[]): Promise<void> {
-	for (const batch of chunk(rows, 2000)) {
+export async function upsertPrFacts(rows: PrFact[]): Promise<void> {
+	for (const batch of chunk(rows, 4000)) {
 		await db()
-			.insert(repoMonth)
+			.insert(prFact)
 			.values(batch)
 			.onConflictDoUpdate({
-				target: [repoMonth.owner, repoMonth.repo, repoMonth.month],
-				set: repoMonthConflictSet()
-			});
-	}
-}
-
-// --- member_repo_month ---
-async function selectMemberRepoMonthRows(logins: string[], repos: Repo[], months: string[]) {
-	if (!logins.length || !repos.length || !months.length) return [];
-	const want = repoSet(repos);
-	const rows = await db()
-		.select()
-		.from(memberRepoMonth)
-		.where(
-			and(
-				inArray(memberRepoMonth.login, logins),
-				inArray(memberRepoMonth.owner, owners(repos)),
-				inArray(memberRepoMonth.repo, repoNames(repos)),
-				inArray(memberRepoMonth.month, months)
-			)
-		);
-	return rows.filter((r) => want.has(`${r.owner}/${r.repo}`));
-}
-
-export async function getMemberRepoMonths(
-	logins: string[],
-	repos: Repo[],
-	months: string[]
-): Promise<MemberRepoMonthRow[]> {
-	return stripFetchedAt(await selectMemberRepoMonthRows(logins, repos, months));
-}
-
-/** Member rows for a report plus the `${login}::${owner}/${repo}::${month}` →
- * fetched_at map that drives staleness, both from a single query. */
-export async function getMemberRepoMonthsWithFetchedAt(
-	logins: string[],
-	repos: Repo[],
-	months: string[]
-): Promise<{ rows: MemberRepoMonthRow[]; fetchedAt: Map<string, Date> }> {
-	const raw = await selectMemberRepoMonthRows(logins, repos, months);
-	const fetchedAt = new Map<string, Date>();
-	for (const r of raw) fetchedAt.set(`${r.login}::${r.owner}/${r.repo}::${r.month}`, r.fetchedAt);
-	return { rows: stripFetchedAt(raw), fetchedAt };
-}
-
-export async function upsertMemberRepoMonths(rows: MemberRepoMonthRow[]): Promise<void> {
-	for (const batch of chunk(rows, 5000)) {
-		await db()
-			.insert(memberRepoMonth)
-			.values(batch)
-			.onConflictDoUpdate({
-				target: [memberRepoMonth.login, memberRepoMonth.owner, memberRepoMonth.repo, memberRepoMonth.month],
+				target: [prFact.owner, prFact.repo, prFact.number],
 				set: {
-					commits: sqlExcluded('commits'),
-					weekendCommits: sqlExcluded('weekend_commits'),
-					lateNightCommits: sqlExcluded('late_night_commits'),
-					activeWeeks: sqlExcluded('active_weeks'),
-					mergedPrs: sqlExcluded('merged_prs'),
+					author: sqlExcluded('author'),
+					createdAt: sqlExcluded('created_at'),
+					mergedAt: sqlExcluded('merged_at'),
+					closedAt: sqlExcluded('closed_at'),
 					additions: sqlExcluded('additions'),
 					deletions: sqlExcluded('deletions'),
-					fetchedAt: sql`now()`
-				}
+					comments: sqlExcluded('comments'),
+					reviews: sqlExcluded('reviews'),
+					fetchedAt: sql`now()`,
+				},
 			});
 	}
 }
 
-// --- review_repo_month ---
-export async function getReviewRepoMonths(repos: Repo[], months: string[]): Promise<ReviewRepoMonthRow[]> {
-	if (!repos.length || !months.length) return [];
-	const want = repoSet(repos);
-	const rows = await db()
-		.select()
-		.from(reviewRepoMonth)
-		.where(
-			and(
-				inArray(reviewRepoMonth.owner, owners(repos)),
-				inArray(reviewRepoMonth.repo, repoNames(repos)),
-				inArray(reviewRepoMonth.month, months)
-			)
-		);
-	return stripFetchedAt(rows.filter((r) => want.has(`${r.owner}/${r.repo}`)));
-}
-
-export async function upsertReviewRepoMonths(rows: ReviewRepoMonthRow[]): Promise<void> {
-	for (const batch of chunk(rows, 5000)) {
+export async function upsertIssueFacts(rows: IssueFact[]): Promise<void> {
+	for (const batch of chunk(rows, 6000)) {
 		await db()
-			.insert(reviewRepoMonth)
+			.insert(issueFact)
 			.values(batch)
 			.onConflictDoUpdate({
-				target: [reviewRepoMonth.reviewer, reviewRepoMonth.owner, reviewRepoMonth.repo, reviewRepoMonth.month],
-				set: { reviews: sqlExcluded('reviews'), comments: sqlExcluded('comments'), fetchedAt: sql`now()` }
+				target: [issueFact.owner, issueFact.repo, issueFact.number],
+				set: {
+					createdAt: sqlExcluded('created_at'),
+					closedAt: sqlExcluded('closed_at'),
+					labels: sqlExcluded('labels'),
+					fetchedAt: sql`now()`,
+				},
 			});
 	}
 }
 
-// onConflict update set for every non-key column of repo_month.
-function repoMonthConflictSet() {
-	const cols: Record<string, string> = {
-		created: 'created',
-		merged: 'merged',
-		closed: 'closed',
-		additions: 'additions',
-		deletions: 'deletions',
-		addPerPr: 'add_per_pr',
-		delPerPr: 'del_per_pr',
-		daysPerPr: 'days_per_pr',
-		commentsPerPr: 'comments_per_pr',
-		reviewsPerPr: 'reviews_per_pr',
-		bugs: 'bugs',
-		issues: 'issues',
-		issuesOpen: 'issues_open',
-		bugsOpen: 'bugs_open',
-		prsOpen: 'prs_open',
-		releases: 'releases',
-		resolutionDays: 'resolution_days',
-		resolutionRate: 'resolution_rate'
+export async function upsertCommitFacts(rows: CommitFact[]): Promise<void> {
+	// Commits are immutable; re-seeing a SHA carries no new information.
+	for (const batch of chunk(rows, 6000)) {
+		await db().insert(commitFact).values(batch).onConflictDoNothing();
+	}
+}
+
+export async function upsertReviewFacts(rows: ReviewFact[]): Promise<void> {
+	for (const batch of chunk(rows, 5000)) {
+		await db()
+			.insert(reviewFact)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [reviewFact.owner, reviewFact.repo, reviewFact.id],
+				set: { state: sqlExcluded('state'), ts: sqlExcluded('ts') },
+			});
+	}
+}
+
+export async function upsertReleaseFacts(rows: ReleaseFact[]): Promise<void> {
+	for (const batch of chunk(rows, 8000)) {
+		await db()
+			.insert(releaseFact)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [releaseFact.owner, releaseFact.repo, releaseFact.tag],
+				set: { publishedAt: sqlExcluded('published_at') },
+			});
+	}
+}
+
+export async function upsertStockDays(rows: StockDay[]): Promise<void> {
+	for (const batch of chunk(rows, 8000)) {
+		await db()
+			.insert(repoStockDay)
+			.values(batch)
+			.onConflictDoUpdate({
+				target: [repoStockDay.owner, repoStockDay.repo, repoStockDay.day],
+				set: {
+					issuesOpen: sqlExcluded('issues_open'),
+					bugsOpen: sqlExcluded('bugs_open'),
+					prsOpen: sqlExcluded('prs_open'),
+					fetchedAt: sql`now()`,
+				},
+			});
+	}
+}
+
+// --- sync watermarks ----------------------------------------------------------
+
+export async function getRepoSyncRows(repos: Repo[]): Promise<RepoSyncRow[]> {
+	if (!repos.length) return [];
+	const rows = await db()
+		.select()
+		.from(repoSync)
+		.where(and(inArray(repoSync.owner, owners(repos)), inArray(repoSync.repo, repoNames(repos))));
+	return filterRepos(rows, repos);
+}
+
+export async function upsertRepoSync(row: Omit<RepoSyncRow, 'fetchedAt'>): Promise<void> {
+	await db()
+		.insert(repoSync)
+		.values(row)
+		.onConflictDoUpdate({
+			target: [repoSync.owner, repoSync.repo],
+			set: {
+				backfilledFrom: sqlExcluded('backfilled_from'),
+				activityBackfilledFrom: sqlExcluded('activity_backfilled_from'),
+				syncedThrough: sqlExcluded('synced_through'),
+				fetchedAt: sql`now()`,
+			},
+		});
+}
+
+// --- fact reads (one bundle per report) ---------------------------------------
+
+/**
+ * Everything the aggregator needs, in parallel. `start`/`end` bound the report
+ * span (oldest chart month .. now); `activityStart` separately bounds the
+ * heavier commit/review facts to the member window.
+ * PR/issue facts use an open-interval predicate — an item created before the
+ * span still matters while it is open (stock) or if it closed inside the span.
+ */
+export async function readFactBundle(
+	repos: Repo[],
+	start: Date,
+	activityStart: Date,
+	end: Date,
+): Promise<FactBundle> {
+	if (!repos.length) {
+		return {
+			prs: [],
+			issues: [],
+			commits: [],
+			reviews: [],
+			releases: [],
+			stocks: [],
+		};
+	}
+	const ownerIn = <T extends { owner: any; repo: any }>(t: T) =>
+		and(inArray(t.owner, owners(repos)), inArray(t.repo, repoNames(repos)));
+
+	const [prs, issues, commits, reviews, releases, stocks] = await Promise.all([
+		db()
+			.select()
+			.from(prFact)
+			.where(
+				and(
+					ownerIn(prFact),
+					lte(prFact.createdAt, end),
+					or(isNull(prFact.closedAt), gte(prFact.closedAt, start)),
+				),
+			),
+		db()
+			.select()
+			.from(issueFact)
+			.where(
+				and(
+					ownerIn(issueFact),
+					lte(issueFact.createdAt, end),
+					or(isNull(issueFact.closedAt), gte(issueFact.closedAt, start)),
+				),
+			),
+		db()
+			.select()
+			.from(commitFact)
+			.where(
+				and(
+					ownerIn(commitFact),
+					gte(commitFact.committedAt, activityStart),
+					lte(commitFact.committedAt, end),
+				),
+			),
+		db()
+			.select()
+			.from(reviewFact)
+			.where(and(ownerIn(reviewFact), gte(reviewFact.ts, activityStart), lte(reviewFact.ts, end))),
+		db()
+			.select()
+			.from(releaseFact)
+			.where(
+				and(
+					ownerIn(releaseFact),
+					gte(releaseFact.publishedAt, start),
+					lte(releaseFact.publishedAt, end),
+				),
+			),
+		// Stock snapshots are sparse (month ends + recent days); read them all for
+		// the repo set and pick per-bucket in the aggregator.
+		db().select().from(repoStockDay).where(ownerIn(repoStockDay)),
+	]);
+
+	return {
+		prs: filterRepos(prs, repos),
+		issues: filterRepos(issues, repos),
+		commits: filterRepos(commits, repos),
+		reviews: filterRepos(reviews, repos) as ReviewFact[],
+		releases: filterRepos(releases, repos),
+		stocks: filterRepos(stocks, repos),
 	};
-	const set: Record<string, unknown> = {};
-	for (const [prop, col] of Object.entries(cols)) set[prop] = sqlExcluded(col);
-	set.fetchedAt = sql`now()`;
-	return set;
 }
