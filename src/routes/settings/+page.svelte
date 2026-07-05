@@ -9,6 +9,77 @@
 
 	let { data } = $props();
 
+	// --- Data sync panel: per-repo watermarks + fact counts (admin tooling) ----
+	type SyncRow = {
+		owner: string;
+		repo: string;
+		backfilledFrom: string;
+		activityBackfilledFrom: string;
+		reviewBackfilledFrom: string | null;
+		syncedThrough: string;
+		fetchedAt: string;
+		prFacts: number;
+		commitFacts: number;
+		reviewFacts: number;
+	};
+	let syncRows = $state<SyncRow[]>([]);
+	let syncLoading = $state(false);
+	let resyncing = $state<Record<string, boolean>>({});
+	const loadSync = async () => {
+		syncLoading = true;
+		try {
+			const res = await fetch('/api/sync');
+			if (res.ok) syncRows = (await res.json()).repos;
+		} finally {
+			syncLoading = false;
+		}
+	};
+	$effect(() => {
+		loadSync();
+	});
+	const ageOf = (iso: string) => {
+		const mins = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+		return mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.round(mins / 60)}h ago` : `${Math.round(mins / 1440)}d ago`;
+	};
+	let backfillMonths = $state(12);
+	let backfilling = $state(false);
+	let backfillMsg = $state('');
+	const backfillAll = async () => {
+		backfilling = true;
+		backfillMsg = '';
+		try {
+			const res = await fetch('/api/sync/backfill', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ months: backfillMonths })
+			});
+			if (res.ok) {
+				const r = await res.json();
+				backfillMsg = `Backfilling ${r.started} repos to ${r.from} in the background.`;
+				setTimeout(loadSync, 5000);
+			} else {
+				backfillMsg = `Failed: ${(await res.text()).slice(0, 120)}`;
+			}
+		} finally {
+			backfilling = false;
+		}
+	};
+	const resync = async (owner: string, repo: string) => {
+		const k = `${owner}/${repo}`;
+		resyncing = { ...resyncing, [k]: true };
+		try {
+			await fetch('/api/sync/reset', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ repos: [{ owner, repo }] })
+			});
+			// The refetch runs server-side in the background; poll once after a bit.
+			setTimeout(loadSync, 4000);
+		} finally {
+			setTimeout(() => (resyncing = { ...resyncing, [k]: false }), 4000);
+		}
+	};
+
 	// One-shot editor: snapshot the loaded settings into form state.
 	const { settings: s, repos: discoverRepos } = untrack(() => data);
 	const initialKeys = s.globalRepos.map(repoKey);
@@ -313,6 +384,94 @@
 				</span>
 			{/if}
 		</form>
+	</Card.Root>
+
+	<!-- Data sync: fact-store watermarks per repo -->
+	<Card.Root class="mt-5 gap-0 p-6 shadow-sm">
+		<div class="flex items-center justify-between gap-3">
+			<div class="flex items-center gap-2.5">
+				<Server class="h-4 w-4 text-[var(--color-brand)]" />
+				<h2 class="font-display text-lg leading-none">Data sync</h2>
+			</div>
+			<Button variant="ghost" size="sm" onclick={loadSync} disabled={syncLoading}>
+				{#if syncLoading}<Loader2 class="h-4 w-4 animate-spin" />{:else}<RefreshCw class="h-4 w-4" />{/if}
+			</Button>
+		</div>
+		<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
+			How far back each repository's facts reach and when its recent tail was last refreshed.
+			Re-sync refetches a repo's whole history in the background (use after label renames or
+			anything that makes stored history stale).
+		</p>
+		<div class="mt-4 flex flex-wrap items-center gap-3">
+			<label class="flex items-center gap-2 text-sm text-[var(--color-ink-700)]">
+				Backfill all repositories to
+				<input
+					type="number"
+					min="1"
+					max="24"
+					bind:value={backfillMonths}
+					class="h-8 w-16 rounded-md border border-[var(--color-ink-300)] bg-[var(--color-card)] px-2 text-center font-mono tabular text-sm"
+				/>
+				months ago
+			</label>
+			<Button variant="outline" size="sm" onclick={backfillAll} disabled={backfilling}>
+				{#if backfilling}<Loader2 class="h-4 w-4 animate-spin" />{/if}
+				Backfill history
+			</Button>
+			{#if backfillMsg}
+				<span class="text-xs text-[var(--color-ink-600)]">{backfillMsg}</span>
+			{/if}
+		</div>
+		{#if syncRows.length}
+			<div class="mt-4 overflow-x-auto">
+				<table class="w-full text-left text-xs">
+					<thead>
+						<tr class="border-b border-[var(--color-ink-200)] text-[10px] uppercase tracking-wider text-[var(--color-ink-500)]">
+							<th class="py-2 pr-3">Repository</th>
+							<th class="py-2 pr-3">History from</th>
+							<th class="py-2 pr-3">Commits from</th>
+							<th class="py-2 pr-3">Reviews from</th>
+							<th class="py-2 pr-3">Synced through</th>
+							<th class="py-2 pr-3">Last refresh</th>
+							<th class="py-2 pr-3 text-right">PRs</th>
+							<th class="py-2 pr-3 text-right">Commits</th>
+							<th class="py-2 pr-3 text-right">Reviews</th>
+							<th class="py-2"></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each syncRows as r (`${r.owner}/${r.repo}`)}
+							<tr class="border-b border-[var(--color-ink-100)]">
+								<td class="py-2 pr-3 font-mono">{r.owner}/{r.repo}</td>
+								<td class="py-2 pr-3 font-mono tabular">{r.backfilledFrom}</td>
+								<td class="py-2 pr-3 font-mono tabular">{r.activityBackfilledFrom}</td>
+								<td class="py-2 pr-3 font-mono tabular">{r.reviewBackfilledFrom ?? '(healing)'}</td>
+								<td class="py-2 pr-3 font-mono tabular">{r.syncedThrough}</td>
+								<td class="py-2 pr-3">{ageOf(r.fetchedAt)}</td>
+								<td class="py-2 pr-3 text-right font-mono tabular">{r.prFacts.toLocaleString()}</td>
+								<td class="py-2 pr-3 text-right font-mono tabular">{r.commitFacts.toLocaleString()}</td>
+								<td class="py-2 pr-3 text-right font-mono tabular">{r.reviewFacts.toLocaleString()}</td>
+								<td class="py-2 text-right">
+									<Button
+										variant="ghost"
+										size="sm"
+										class="h-7 px-2 text-xs"
+										disabled={resyncing[`${r.owner}/${r.repo}`]}
+										onclick={() => resync(r.owner, r.repo)}
+									>
+										{#if resyncing[`${r.owner}/${r.repo}`]}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}Re-sync{/if}
+									</Button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{:else if !syncLoading}
+			<p class="mt-4 text-sm text-[var(--color-ink-600)]">
+				No repositories synced yet — data lands here after the first report or warm run.
+			</p>
+		{/if}
 	</Card.Root>
 
 	<!-- Access (read-only; admins are bootstrapped via env) -->

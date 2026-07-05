@@ -4,12 +4,12 @@
 	import MiniAreaChart from '$lib/components/charts/MiniAreaChart.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { metrics, forceRefresh, selectionFor } from '$lib/client/metrics.svelte';
+	import { metrics } from '$lib/client/metrics.svelte';
 	import { scope } from '$lib/client/scope.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
 	import { monthKeyOf } from '$lib/months';
-	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, RefreshCw, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
+	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import { computeAwards } from '$lib/awards';
 
@@ -80,7 +80,6 @@
 	// facts. It always spans a full 30 days, so it never cliffs to ~0 on the 1st
 	// the way an in-progress calendar month does. Falls back to the last complete
 	// month's totals only when a (stale-cached) result predates the window field.
-	let refreshing = $state(false);
 	const win = $derived(stats?.window30d ?? null);
 	const hasWindow = $derived(!!win && win.computedAt !== null);
 
@@ -100,21 +99,6 @@
 	});
 	const heroPeriod = $derived(hasWindow ? 'last 30 days' : 'last month');
 	const heroHint = $derived(hasWindow ? 'vs. previous 30 days' : 'vs. previous month');
-
-	// Force-refetch the fact tail from GitHub, then reload through the (now fresh)
-	// metrics cache so every derived section updates together.
-	async function refreshNow() {
-		if (refreshing || !team) return;
-		refreshing = true;
-		try {
-			await forceRefresh(selectionFor(team, scope.months, scope.memberMonths, scope.to || undefined));
-			await metrics.load(selectionFor(team, scope.months, scope.memberMonths, scope.to || undefined));
-		} catch {
-			// Leave the current data in place; the refresh is best-effort.
-		} finally {
-			refreshing = false;
-		}
-	}
 
 	const mergedSpark = $derived(totalMonthly.map(([, v]) => v.merged));
 	const createdSpark = $derived(totalMonthly.map(([, v]) => v.created));
@@ -190,9 +174,6 @@
 >
 	{#snippet actions()}
 		{#if stats}
-			<Button variant="outline" size="lg" onclick={refreshNow} disabled={refreshing} title="Refetch the latest data from GitHub now">
-				<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" /> Refresh
-			</Button>
 			<Button variant="outline" size="lg" onclick={exportPdf}>
 				<FileDown class="h-4 w-4" /> Export PDF
 			</Button>

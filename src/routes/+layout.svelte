@@ -4,7 +4,7 @@
 	import ScopeBar from '$lib/components/ScopeBar.svelte';
 	import LoadingBar from '$lib/components/LoadingBar.svelte';
 	import { scope } from '$lib/client/scope.svelte';
-	import { metrics, globalMetrics } from '$lib/client/metrics.svelte';
+	import { metrics, globalMetrics, forceRefresh, selectionFor, type RefreshKind } from '$lib/client/metrics.svelte';
 	import { attention } from '$lib/client/attention.svelte';
 	import { flow } from '$lib/client/flow.svelte';
 	import { page } from '$app/state';
@@ -14,14 +14,57 @@
 
 	// The store that backs the current route, so the loading dim, the top bar, and
 	// Refresh all act on the data actually shown (not always the team report).
+	// Refresh FORCES a server-side refetch + cache replace for the kinds the page
+	// shows (a plain store reload would only re-read the same warm cache), then
+	// reloads the stores to pick up the fresh entries.
+	let forcing = $state(false);
+	const forceThenReload = (kinds: RefreshKind[], reloads: (() => void)[]) => async () => {
+		if (forcing) return;
+		const t = scope.activeTeam ?? data.defaultTeams?.[0];
+		if (!t) return;
+		forcing = true;
+		try {
+			await forceRefresh(selectionFor(t, scope.months, scope.memberMonths, scope.to || undefined), kinds);
+		} catch {
+			// Best-effort: still reload below so the button gives feedback.
+		} finally {
+			forcing = false;
+		}
+		for (const r of reloads) r();
+	};
+	const forceGlobal = async () => {
+		if (forcing) return;
+		forcing = true;
+		try {
+			await forceRefresh(
+				{ repos: data.global.repos, members: [], months: data.global.months, memberMonths: 1 },
+				['metrics']
+			);
+		} catch {
+			/* best-effort */
+		} finally {
+			forcing = false;
+		}
+		globalMetrics.reload();
+	};
 	const active = $derived.by(() => {
 		const p = page.url.pathname;
-		if (p.startsWith('/attention')) return { loading: attention.loading, refresh: () => attention.reload() };
-		if (p.startsWith('/flow')) return { loading: flow.loading, refresh: () => flow.reload() };
-		if (p.startsWith('/global') || p.startsWith('/breakdown')) return { loading: globalMetrics.loading, refresh: () => globalMetrics.reload() };
-		return { loading: metrics.loading, refresh: () => scope.reload() };
+		if (p.startsWith('/attention'))
+			return { loading: attention.loading, refresh: forceThenReload(['attention'], [() => attention.reload()]) };
+		if (p.startsWith('/flow') || p.startsWith('/bots'))
+			return { loading: flow.loading, refresh: forceThenReload(['flow'], [() => flow.reload()]) };
+		if (p.startsWith('/signals'))
+			return {
+				loading: metrics.loading || flow.loading || attention.loading,
+				refresh: forceThenReload(['metrics', 'flow', 'attention'], [() => scope.reload(), () => flow.reload(), () => attention.reload()])
+			};
+		if (p.startsWith('/charts'))
+			return { loading: metrics.loading || flow.loading, refresh: forceThenReload(['metrics', 'flow'], [() => scope.reload(), () => flow.reload()]) };
+		if (p.startsWith('/global') || p.startsWith('/breakdown'))
+			return { loading: globalMetrics.loading, refresh: forceGlobal };
+		return { loading: metrics.loading, refresh: forceThenReload(['metrics'], [() => scope.reload()]) };
 	});
-	const loading = $derived(active.loading);
+	const loading = $derived(active.loading || forcing);
 
 	// Per-page browser title: "Section · team·health".
 	const pageSection = $derived.by(() => {
