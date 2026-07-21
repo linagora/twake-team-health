@@ -5,7 +5,7 @@ import { median, round } from './github/stats';
 import { ensureFactsSynced } from './sync';
 import * as store from './store';
 import { hasDb } from './db';
-import { dayOf, dayStartMs } from './days';
+import { dayOf, dayStartMs, addDays, rollingWindows, WINDOW_DAYS, type MsWindow } from './days';
 import type {
 	Repo,
 	PrFact,
@@ -13,6 +13,7 @@ import type {
 	PrFlow,
 	FlowStats,
 	FlowResult,
+	ReviewerLoad,
 	BotActivity,
 	BotMonthActivity,
 } from './github/types';
@@ -168,6 +169,40 @@ export function buildFlowFromFacts(
 	return { prs: out, botActivity, botByMonth };
 }
 
+/** Rolling trailing-30d flow: the same cycle-time / review-coverage stats as
+ * `statsFor`, but over PRs merged in the current vs previous 30-day window (not
+ * calendar months), plus the current window's reviewer load. Pure. */
+export function rollingFlow(
+	prs: PrFact[],
+	reviews: ReviewFact[],
+	endDay: string,
+): { current: FlowStats; previous: FlowStats; reviewerLoad: ReviewerLoad[] } {
+	const { current, previous } = rollingWindows(endDay);
+	// Month keys spanning the whole 2N-day window, so buildFlowFromFacts keeps
+	// every PR merged in it (it filters by merge month).
+	const spanKeys = new Set<string>();
+	for (let ms = previous.startMs; ms <= current.endMs; ms += 86_400_000) {
+		const d = new Date(ms);
+		spanKeys.add(monthKey({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 }));
+	}
+	const built = buildFlowFromFacts(prs, reviews, spanKeys);
+	const inWin = (iso: string, w: MsWindow): boolean => {
+		const t = Date.parse(iso);
+		return t >= w.startMs && t <= w.endMs;
+	};
+	const curPrs = built.prs.filter((p) => inWin(p.mergedAt, current));
+	const load = new Map<string, number>();
+	for (const p of curPrs) for (const r of p.reviewers) load.set(r, (load.get(r) ?? 0) + 1);
+	const reviewerLoad = [...load.entries()]
+		.map(([reviewer, n]) => ({ reviewer, prs: n }))
+		.sort((a, b) => b.prs - a.prs);
+	return {
+		current: statsFor(curPrs),
+		previous: statsFor(built.prs.filter((p) => inWin(p.mergedAt, previous))),
+		reviewerLoad,
+	};
+}
+
 export async function getFlowReport(
 	repos: Repo[],
 	months: number,
@@ -182,12 +217,17 @@ export async function getFlowReport(
 	// in the background), then aggregate from the store — no per-request GitHub
 	// fetch of unchanging history.
 	if (hasDb()) {
-		const spanStartDay = monthStart(ms[0]);
+		// Read at least the last 2N days so the rolling window has its previous
+		// window's facts even when the selection is a single month.
+		const rollingStart = addDays(dayOf(now), -(2 * WINDOW_DAYS - 1));
+		const monthSpanStart = monthStart(ms[0]);
+		const spanStartDay = monthSpanStart < rollingStart ? monthSpanStart : rollingStart;
 		await ensureFactsSynced(repos, spanStartDay, dayOf(now), spanStartDay, { now, swr: true }, gql);
 		const start = new Date(dayStartMs(spanStartDay));
 		const { prs, reviews } = await store.readFlowFacts(repos, start, now);
 		const built = buildFlowFromFacts(prs, reviews, new Set(keys));
-		return computeFlow(built.prs, keys, now.getTime(), built.botActivity, built.botByMonth);
+		const recent = rollingFlow(prs, reviews, dayOf(now));
+		return { ...computeFlow(built.prs, keys, now.getTime(), built.botActivity, built.botByMonth), recent };
 	}
 
 	// No-DB fallback: the legacy live extraction.

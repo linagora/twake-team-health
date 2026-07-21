@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeFlow } from './flow';
+import { computeFlow, rollingFlow } from './flow';
 import type { PrFlow } from './github/types';
 
 const NOW = Date.parse('2026-06-26T00:00:00Z');
@@ -169,5 +169,36 @@ describe('buildFlowFromFacts', () => {
 		];
 		const { prs } = buildFlowFromFacts([prFact({})], reviews, months);
 		expect(prs[0].firstReviewAt).toBeNull();
+	});
+});
+
+describe('rollingFlow', () => {
+	// Windows ending Jul 5: current = Jun 6..Jul 5, previous = May 7..Jun 5.
+	const END = '2026-07-05';
+
+	it('splits flow stats between the current and previous 30-day merge windows', () => {
+		const prs: PrFact[] = [
+			prFact({
+				number: 1,
+				createdAt: dd('2026-06-30T00:00:00Z'),
+				mergedAt: dd('2026-07-01T00:00:00Z'),
+				closedAt: dd('2026-07-01T00:00:00Z'),
+			}), // current, reviewed
+			prFact({
+				number: 2,
+				createdAt: dd('2026-05-20T00:00:00Z'),
+				mergedAt: dd('2026-05-25T00:00:00Z'),
+				closedAt: dd('2026-05-25T00:00:00Z'),
+			}), // previous, unreviewed
+		];
+		const reviews: ReviewFact[] = [
+			rf({ id: 'r1', prNumber: 1, reviewer: 'bob', ts: dd('2026-06-30T06:00:00Z') }),
+		];
+		const { current, previous, reviewerLoad } = rollingFlow(prs, reviews, END);
+		expect(current.count).toBe(1);
+		expect(current.reviewedPct).toBe(100);
+		expect(previous.count).toBe(1);
+		expect(previous.reviewedPct).toBe(0);
+		expect(reviewerLoad).toEqual([{ reviewer: 'bob', prs: 1 }]);
 	});
 });

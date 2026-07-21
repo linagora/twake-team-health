@@ -392,4 +392,62 @@ describe('aggregateRecent', () => {
 		const { window30d } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
 		expect(window30d.current.created).toBe(0);
 	});
+
+	it('counts distinct repos each member committed to in the window (breadth)', () => {
+		const bundle = empty();
+		bundle.commits = [
+			commit({ oid: 'a1', repo: 'a', committedAt: d('2026-07-01T10:00:00Z'), committedDate: '2026-07-01T10:00:00Z' }),
+			commit({ oid: 'a2', repo: 'a', committedAt: d('2026-07-03T10:00:00Z'), committedDate: '2026-07-03T10:00:00Z' }),
+			commit({ oid: 'b1', repo: 'b', committedAt: d('2026-07-02T10:00:00Z'), committedDate: '2026-07-02T10:00:00Z' }),
+			// previous window: not counted toward breadth
+			commit({ oid: 'c1', repo: 'c', committedAt: d('2026-05-10T10:00:00Z'), committedDate: '2026-05-10T10:00:00Z' }),
+		];
+		const repos = [REPO, { owner: 'linagora', repo: 'b' }, { owner: 'linagora', repo: 'c' }];
+		const { recentMembers } = aggregateRecent(bundle, repos, MEMBERS, isBugLabel, END, 0);
+		expect(recentMembers.find((r) => r.login === 'alice')).toMatchObject({ commits: 3, repos: 2 });
+	});
+
+	it('reports per-repo current vs previous window activity', () => {
+		const bundle = empty();
+		bundle.prs = [
+			pr({ repo: 'a', number: 1, mergedAt: d('2026-07-01T00:00:00Z') }), // current
+			pr({ repo: 'a', number: 2, mergedAt: d('2026-05-20T00:00:00Z') }), // previous
+			pr({ repo: 'b', number: 3, createdAt: d('2026-06-20T00:00:00Z') }), // current, created only
+		];
+		const repos = [REPO, { owner: 'linagora', repo: 'b' }];
+		const { recentRepos } = aggregateRecent(bundle, repos, MEMBERS, isBugLabel, END, 0);
+		const a = recentRepos.find((r) => r.repo === 'a')!;
+		expect(a.current.merged).toBe(1);
+		expect(a.previous.merged).toBe(1);
+		const b = recentRepos.find((r) => r.repo === 'b')!;
+		expect(b.current.created).toBe(1);
+		expect(b.current.merged).toBe(0);
+	});
+
+	it('produces a rolling per-member work pattern over the current window', () => {
+		const bundle = empty();
+		bundle.commits = [
+			commit({ oid: 'w1', committedDate: '2026-07-01T10:00:00Z', committedAt: d('2026-07-01T10:00:00Z') }),
+			commit({ oid: 'w2', committedDate: '2026-07-02T10:00:00Z', committedAt: d('2026-07-02T10:00:00Z') }),
+			// previous window: excluded from the rolling pattern
+			commit({ oid: 'w3', committedDate: '2026-05-10T10:00:00Z', committedAt: d('2026-05-10T10:00:00Z') }),
+		];
+		const { recentWorkPattern } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		const a = recentWorkPattern.find((w) => w.author === 'alice')!;
+		expect(a.commits).toBe(2);
+		expect(a.activeWeeks.length).toBeGreaterThan(0);
+	});
+
+	it('builds a continuous zero-filled daily series over the 2N-day span', () => {
+		const bundle = empty();
+		bundle.prs = [pr({ number: 1, createdAt: d('2026-06-20T00:00:00Z'), mergedAt: d('2026-07-01T12:00:00Z') })];
+		bundle.issues = [issue({ number: 1, createdAt: d('2026-06-25T00:00:00Z'), labels: ['bug'] })];
+		const { recentDaily } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		expect(recentDaily.length).toBe(60);
+		expect(recentDaily[0].day).toBe('2026-05-07');
+		expect(recentDaily.at(-1)!.day).toBe('2026-07-05');
+		expect(recentDaily.find((x) => x.day === '2026-07-01')!.merged).toBe(1);
+		expect(recentDaily.find((x) => x.day === '2026-06-20')!.created).toBe(1);
+		expect(recentDaily.find((x) => x.day === '2026-06-25')!.bugs).toBe(1);
+	});
 });

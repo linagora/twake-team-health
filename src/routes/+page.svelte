@@ -11,7 +11,7 @@
 	import { monthKeyOf } from '$lib/months';
 	import { ArrowUpRight, AlertCircle, GitBranch, Users, Activity, Loader2, FileDown, Zap, GitMerge, ShieldCheck, MessageSquare, Scale, Compass, Trophy } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
-	import { computeAwards } from '$lib/awards';
+	import { computeAwards, computeAwardsFromRecent } from '$lib/awards';
 
 	let { data } = $props();
 
@@ -22,7 +22,13 @@
 	const team = $derived(scope.activeTeam ?? data.defaultTeams?.[0]);
 
 	// Playful per-member superlatives ("The Machine", etc.) for the standouts row.
-	const awards = $derived(stats ? computeAwards(stats, team?.members ?? []) : []);
+	// Rolling trailing-30d by default; monthly only as a stale-cache fallback.
+	const awards = $derived.by(() => {
+		if (!stats) return [];
+		const members = team?.members ?? [];
+		const recent = stats.recentMembers ?? [];
+		return recent.length ? computeAwardsFromRecent(recent, members) : computeAwards(stats, members);
+	});
 	const awardIcon: Record<string, typeof Zap> = {
 		commits: Zap,
 		merged: GitMerge,
@@ -100,21 +106,40 @@
 	const heroPeriod = $derived(hasWindow ? 'last 30 days' : 'last month');
 	const heroHint = $derived(hasWindow ? 'vs. previous 30 days' : 'vs. previous month');
 
-	const mergedSpark = $derived(totalMonthly.map(([, v]) => v.merged));
-	const createdSpark = $derived(totalMonthly.map(([, v]) => v.created));
-	const bugSpark = $derived(totalMonthly.map(([, v]) => v.bugs));
+	// Sparklines: rolling daily series over the trailing window (falls back to the
+	// monthly buckets only for a stale-cached result without the daily field).
+	const daily = $derived(stats?.recentDaily ?? []);
+	const mergedSpark = $derived(daily.length ? daily.map((d) => d.merged) : totalMonthly.map(([, v]) => v.merged));
+	const createdSpark = $derived(daily.length ? daily.map((d) => d.created) : totalMonthly.map(([, v]) => v.created));
+	const bugSpark = $derived(daily.length ? daily.map((d) => d.bugs) : totalMonthly.map(([, v]) => v.bugs));
 
+	// Most active repositories over the trailing 30 days, with a vs-previous-30d
+	// delta on merges. Falls back to monthly window sums for a stale-cached result.
 	const topRepos = $derived.by(() => {
-		const byRepo = new Map<string, { merged: number; created: number; bugs: number }>();
+		const recent = stats?.recentRepos ?? [];
+		if (recent.length) {
+			return recent
+				.map((r) => ({
+					repo: `${r.owner}/${r.repo}`,
+					merged: r.current.merged,
+					created: r.current.created,
+					bugs: r.current.bugs,
+					delta: r.current.merged - r.previous.merged
+				}))
+				.filter((r) => r.merged > 0 || r.created > 0 || r.bugs > 0)
+				.sort((a, b) => b.merged - a.merged)
+				.slice(0, 6);
+		}
+		const byRepo = new Map<string, { repo: string; merged: number; created: number; bugs: number; delta: number }>();
 		for (const r of stats?.repos ?? []) {
 			const k = `${r.owner}/${r.repo}`;
-			const e = byRepo.get(k) ?? { merged: 0, created: 0, bugs: 0 };
+			const e = byRepo.get(k) ?? { repo: k, merged: 0, created: 0, bugs: 0, delta: 0 };
 			e.merged += r.merged;
 			e.created += r.created;
 			e.bugs += r.bugs;
 			byRepo.set(k, e);
 		}
-		return [...byRepo.entries()].sort((a, b) => b[1].merged - a[1].merged).slice(0, 6);
+		return [...byRepo.values()].sort((a, b) => b.merged - a.merged).slice(0, 6);
 	});
 
 	// Map GitHub login -> the team member's display name (case-insensitive).
@@ -240,7 +265,7 @@
 		<section class="mb-14">
 			<div class="mb-6 flex items-baseline justify-between">
 				<div>
-					<div class="eyebrow mb-2">Most active repositories · last {scope.months}m</div>
+					<div class="eyebrow mb-2">Most active repositories · last 30 days</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Where the shipping happens</h2>
 				</div>
 				<a href="/charts" class="text-xs text-[var(--color-ink-700)] hover:text-[var(--color-brand)] inline-flex items-center gap-1">
@@ -248,16 +273,16 @@
 				</a>
 			</div>
 			<Card.Root class="gap-0 py-0 overflow-hidden shadow-sm">
-				{#each topRepos as [repo, m], i (repo)}
+				{#each topRepos as r, i (r.repo)}
 					<div class="group flex items-center gap-5 px-5 py-4 {i !== 0 ? 'border-t border-[var(--color-ink-200)]' : ''}">
 						<span class="font-mono tabular text-xs text-[var(--color-ink-500)] w-6">{String(i + 1).padStart(2, '0')}</span>
 						<div class="flex-1 min-w-0">
-							<div class="font-display text-base text-[var(--color-ink-950)] truncate">{repo}</div>
-							<div class="mt-0.5 font-mono text-[11px] text-[var(--color-ink-600)]">{m.created} created · {m.bugs} {m.bugs === 1 ? 'bug' : 'bugs'}</div>
+							<div class="font-display text-base text-[var(--color-ink-950)] truncate">{r.repo}</div>
+							<div class="mt-0.5 font-mono text-[11px] text-[var(--color-ink-600)]">{r.created} created · {r.bugs} {r.bugs === 1 ? 'bug' : 'bugs'}</div>
 						</div>
 						<div class="text-right">
-							<div class="font-display tabular text-2xl leading-none text-[var(--color-ink-950)]">{m.merged}</div>
-							<div class="eyebrow mt-1.5">merged</div>
+							<div class="font-display tabular text-2xl leading-none text-[var(--color-ink-950)]">{r.merged}</div>
+							<div class="eyebrow mt-1.5">merged{#if r.delta !== 0}<span class="ml-1 {r.delta > 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}">{r.delta > 0 ? '+' : '−'}{Math.abs(r.delta)}</span>{/if}</div>
 						</div>
 					</div>
 				{:else}
@@ -340,7 +365,7 @@
 					<div class="eyebrow mb-2">Standouts</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">The MVPs.</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
-						Who led the pack over the last {scope.memberMonths} months plus this month, one trophy per stat.
+						Who led the pack over the last 30 days, one trophy per stat.
 					</p>
 				</div>
 				<div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -375,11 +400,11 @@
 			{@const maxBar = Math.max(...allMonthly.map(([, v]) => v.merged), 1)}
 			<section class="mt-16">
 				<div class="mb-6">
-					<div class="eyebrow mb-2">Pull requests merged · per month</div>
+					<div class="eyebrow mb-2">Historical trend · merged per month · last {scope.months}m</div>
 					<h2 class="font-display text-[1.75rem] leading-none tracking-tight">Merged PRs, month by month</h2>
 					<p class="mt-2 max-w-xl text-sm text-[var(--color-ink-600)]">
-						Each bar is the number of pull requests the team merged that month — taller means more shipped.
-						The dimmed last bar is the current month so far.
+						Long-range history for context. Each bar is the number of pull requests the team merged that month;
+						the dimmed last bar is the current month so far. Current-state numbers above are a rolling 30-day view.
 					</p>
 				</div>
 				<Card.Root class="p-8 shadow-sm">
