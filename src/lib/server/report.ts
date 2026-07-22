@@ -80,8 +80,8 @@ export async function getReport(
 	gql: GraphQL = graphql,
 ): Promise<MetricsResult> {
 	const shape = resolveReportShape(selection, now);
-	const { bugLabels } = await getAppSettings();
-	const isBug = makeBugMatcher(bugLabels);
+	const { bugLabels, bugIssueTypes } = await getAppSettings();
+	const isBug = makeBugMatcher({ bugLabels, bugIssueTypes });
 	const todayDay = dayOf(now);
 
 	let bundle: FactBundle;

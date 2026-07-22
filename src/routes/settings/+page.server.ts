@@ -51,6 +51,10 @@ export const actions: Actions = {
 					.split(',')
 					.map((s) => s.trim())
 					.filter(Boolean),
+				bugIssueTypes: String(fd.get('bugIssueTypes') ?? '')
+					.split(',')
+					.map((s) => s.trim())
+					.filter(Boolean),
 				signals
 			});
 			return { saved };

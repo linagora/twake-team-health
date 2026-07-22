@@ -13,6 +13,7 @@ import {
 	weekIdOf,
 	pickCommitMember,
 } from '../github/metrics';
+import type { BugSignal } from '../github/stats';
 import { monthKey, monthEnd, monthStartMs, monthEndMs, type Month } from '../github/months';
 import { rollingWindows, dayOf, addDays, type MsWindow } from '../days';
 import type { StoredRows, MemberRepoMonthRow, ReviewRepoMonthRow } from './assemble';
@@ -37,7 +38,7 @@ export type AggregateOptions = {
 	months: Month[];
 	/** Complete months for the member/review series, ascending (suffix of months). */
 	memberMonths: Month[];
-	isBug: (labels: string[]) => boolean;
+	isBug: (s: BugSignal) => boolean;
 };
 
 const rk = (r: { owner: string; repo: string }) => `${r.owner}/${r.repo}`;
@@ -131,6 +132,7 @@ export function buildStoredRows(bundle: FactBundle, opts: AggregateOptions): Sto
 						createdAt: i.createdAt.toISOString(),
 						closedAt: i.closedAt ? i.closedAt.toISOString() : null,
 						labels: { nodes: i.labels.map((name) => ({ name })) },
+						issueType: i.issueType,
 					})),
 				},
 				issues.filter((i) => inWin(i.closedAt, win)).length,
@@ -267,7 +269,7 @@ export function aggregateRecent(
 	bundle: FactBundle,
 	repos: Repo[],
 	members: Member[],
-	isBug: (labels: string[]) => boolean,
+	isBug: (s: BugSignal) => boolean,
 	endDay: string,
 	generatedAt: number,
 ): RecentActivity {
@@ -280,7 +282,7 @@ export function aggregateRecent(
 		created: prs.filter((p) => inWin(p.createdAt, w)).length,
 		merged: prs.filter((p) => inWin(p.mergedAt, w)).length,
 		issues: issues.filter((i) => inWin(i.createdAt, w)).length,
-		bugs: issues.filter((i) => inWin(i.createdAt, w) && isBug(i.labels)).length,
+		bugs: issues.filter((i) => inWin(i.createdAt, w) && isBug(i)).length,
 	});
 
 	const { byLogin, byEmail, tzByLogin } = memberMaps(members);
@@ -354,7 +356,7 @@ export function aggregateRecent(
 			created: rp.filter((p) => inWin(p.createdAt, w)).length,
 			merged: rp.filter((p) => inWin(p.mergedAt, w)).length,
 			issues: ri.filter((i) => inWin(i.createdAt, w)).length,
-			bugs: ri.filter((i) => inWin(i.createdAt, w) && isBug(i.labels)).length,
+			bugs: ri.filter((i) => inWin(i.createdAt, w) && isBug(i)).length,
 		});
 		return { owner: repo.owner, repo: repo.repo, current: rc(current), previous: rc(previous) };
 	});
@@ -377,7 +379,7 @@ export function aggregateRecent(
 		bumpDay(p.mergedAt, 'merged');
 	}
 	for (const i of issues) {
-		if (isBug(i.labels)) bumpDay(i.createdAt, 'bugs');
+		if (isBug(i)) bumpDay(i.createdAt, 'bugs');
 	}
 
 	return {

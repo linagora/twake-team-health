@@ -32,23 +32,36 @@ describe('stats helpers', () => {
 		expect(pickCommitMember(null, byLogin, byEmail)).toBeNull();
 	});
 
-	it('isBugLabel matches whole-word bug labels, not substrings', () => {
+	it('isBugLabel matches whole-word bug/defect labels, not substrings', () => {
 		expect(isBugLabel(['Bug', 'Critical'])).toBe(true);
 		expect(isBugLabel(['bugs'])).toBe(true);
 		expect(isBugLabel(['type:bug'])).toBe(true);
 		expect(isBugLabel(['kind/bug'])).toBe(true);
+		expect(isBugLabel(['defect'])).toBe(true);
 		expect(isBugLabel(['enhancement'])).toBe(false);
 		expect(isBugLabel(['debug'])).toBe(false); // not a bug label
 		expect(isBugLabel(['bugfix'])).toBe(false); // a fix, not a bug report
+		expect(isBugLabel(['regression-test'])).toBe(false); // substring, not the word
 	});
 
-	it('makeBugMatcher uses a configured list (exact, case-insensitive), else the heuristic', () => {
-		const m = makeBugMatcher(['defect', 'Type: Bug']);
-		expect(m(['defect'])).toBe(true);
-		expect(m(['type: bug'])).toBe(true); // case-insensitive
-		expect(m(['bug'])).toBe(false); // not in the configured list
-		// Empty config falls back to the default heuristic.
-		expect(makeBugMatcher([])(['bug'])).toBe(true);
+	it('makeBugMatcher unions configured labels with the default heuristic', () => {
+		const m = makeBugMatcher({ bugLabels: ['defect', 'Type: Bug'] });
+		expect(m({ labels: ['defect'] })).toBe(true);
+		expect(m({ labels: ['type: bug'] })).toBe(true); // configured, case-insensitive
+		expect(m({ labels: ['bug'] })).toBe(true); // heuristic still applies (union, not replace)
+		expect(m({ labels: ['enhancement'] })).toBe(false);
+	});
+
+	it('makeBugMatcher classifies by native issue type (default "Bug")', () => {
+		const def = makeBugMatcher();
+		expect(def({ labels: [], issueType: 'Bug' })).toBe(true); // default, case-insensitive
+		expect(def({ labels: [], issueType: 'Task' })).toBe(false);
+		expect(def({ labels: [], issueType: null })).toBe(false);
+		// A custom type list still matches labels too (union across signals).
+		const m = makeBugMatcher({ bugIssueTypes: ['Incident'] });
+		expect(m({ labels: [], issueType: 'Incident' })).toBe(true);
+		expect(m({ labels: [], issueType: 'Bug' })).toBe(false); // replaced default type list
+		expect(m({ labels: ['bug'], issueType: null })).toBe(true); // label heuristic still on
 	});
 });
 

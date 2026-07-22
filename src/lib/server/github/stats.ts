@@ -23,18 +23,36 @@ export function std(xs: number[]): number {
 	return round(Math.sqrt(variance), 2);
 }
 
-// Match "bug"/"bugs" as a whole word (also "type:bug", "kind/bug"), but not
-// substrings like "debug" or "bugfix" that a plain includes('bug') over-counts.
-const BUG_LABEL_RE = /(^|[^a-z])bugs?([^a-z]|$)/i;
-/** Whether any label marks the issue as a bug (default heuristic). */
+// Match "bug"/"defect" as whole words in a label (also "type:bug", "kind/bug"),
+// but not substrings like "debug", "bugfix", or "regression-test" that a plain
+// includes() would over-count.
+const BUG_LABEL_RE = /(^|[^a-z])(bugs?|defects?)([^a-z]|$)/i;
+/** Whether any label marks the issue as a defect (default label heuristic). */
 export function isBugLabel(labels: string[]): boolean {
 	return labels.some((l) => BUG_LABEL_RE.test(l));
 }
 
-/** A bug-label matcher: exact case-insensitive match against an admin-configured
- * list, or the default heuristic when the list is empty. */
-export function makeBugMatcher(configured: string[]): (labels: string[]) => boolean {
-	if (!configured.length) return isBugLabel;
-	const set = new Set(configured.map((l) => l.toLowerCase()));
-	return (labels) => labels.some((l) => set.has(l.toLowerCase()));
+/** The signals a defect can be inferred from: an issue's labels and its GitHub
+ * native issue type (null when the issue has none, or is not yet refetched). */
+export type BugSignal = { labels: string[]; issueType?: string | null };
+
+/** How to classify a defect: admin-configured label names and native issue-type
+ * names. Both are additive on top of the built-in defaults, so configuring only
+ * ever widens the net. Empty `bugIssueTypes` falls back to the "bug" type. */
+export type BugConfig = { bugLabels?: string[]; bugIssueTypes?: string[] };
+
+/** A defect classifier over an issue's labels AND native issue type. An issue is
+ * a bug when its labels match the default heuristic OR any configured label
+ * (union, not replace), OR its issue type matches a configured type
+ * (default: "bug"). All matching is case-insensitive. */
+export function makeBugMatcher(config: BugConfig = {}): (s: BugSignal) => boolean {
+	const labelSet = new Set((config.bugLabels ?? []).map((l) => l.toLowerCase()));
+	const types = config.bugIssueTypes?.length ? config.bugIssueTypes : ['bug'];
+	const typeSet = new Set(types.map((t) => t.toLowerCase()));
+	return (s) => {
+		const labels = s.labels ?? [];
+		if (isBugLabel(labels)) return true;
+		if (labelSet.size && labels.some((l) => labelSet.has(l.toLowerCase()))) return true;
+		return !!s.issueType && typeSet.has(s.issueType.toLowerCase());
+	};
 }

@@ -94,6 +94,7 @@
 	let fetchConcurrency = $state(s.fetchConcurrency);
 	let orgName = $state(s.orgName);
 	let bugLabels = $state(s.bugLabels.join(', '));
+	let bugIssueTypes = $state(s.bugIssueTypes.join(', '));
 	let signals = $state({ ...s.signals });
 	let repoKeys = $state<string[]>([...initialKeys]);
 	let repoQuery = $state('');
@@ -161,6 +162,7 @@
 				fetchConcurrency = sv.fetchConcurrency;
 				orgName = sv.orgName;
 				bugLabels = (sv.bugLabels ?? []).join(', ');
+				bugIssueTypes = (sv.bugIssueTypes ?? []).join(', ');
 				signals = { ...sv.signals };
 				repoKeys = sv.globalRepos.map(repoKey);
 				saved = true;
@@ -313,14 +315,27 @@
 		<Card.Root class="gap-0 p-6 shadow-sm">
 			<div class="flex items-center gap-2.5">
 				<Bug class="h-4 w-4 text-[var(--color-brand)]" />
-				<h2 class="font-display text-lg leading-none">Bug labels</h2>
+				<h2 class="font-display text-lg leading-none">Bug classification</h2>
 			</div>
 			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
-				Issue labels that count as bugs (comma-separated). Empty = auto-detect any "bug" label. Changes
-				apply to newly-fetched data; rebuilding history needs a full re-fetch.
+				What counts as a bug. Issues match on labels or GitHub issue type, so defects are still
+				counted when labeling is inconsistent.
 			</p>
-			<div class="mt-4">
-				<input class={inputCls} type="text" name="bugLabels" placeholder="bug, type: bug, kind/bug" bind:value={bugLabels} />
+			<div class="mt-4 space-y-3">
+				<label class="block">
+					<span class="text-xs text-[var(--color-ink-600)]">Bug labels (comma-separated)</span>
+					<input class={inputCls} type="text" name="bugLabels" placeholder="bug, type: bug, kind/bug" bind:value={bugLabels} />
+					<span class="mt-1 block text-[11px] text-[var(--color-ink-600)]">
+						Added on top of auto-detecting any "bug"/"defect" label.
+					</span>
+				</label>
+				<label class="block">
+					<span class="text-xs text-[var(--color-ink-600)]">Bug issue types (comma-separated)</span>
+					<input class={inputCls} type="text" name="bugIssueTypes" placeholder="Bug" bind:value={bugIssueTypes} />
+					<span class="mt-1 block text-[11px] text-[var(--color-ink-600)]">
+						GitHub native issue types. Empty = "Bug". Takes effect as issues are re-fetched.
+					</span>
+				</label>
 			</div>
 		</Card.Root>
 
