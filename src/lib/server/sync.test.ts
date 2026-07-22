@@ -64,6 +64,25 @@ describe('planSync', () => {
 		expect(plan.next.syncedThrough).toBe(TODAY);
 	});
 
+	it('a stale refresh reconciles late edits across the whole span (updated: window)', () => {
+		// An issue created earlier but relabeled after first ingest is missed by the
+		// created/closed tail; the reconcile window re-pulls anything updated since.
+		const plan = planSync(
+			row({ syncedThrough: '2026-07-04', fetchedAt: new Date(NOW_MS - 7 * 3600_000) }),
+			SPAN,
+			ACTIVITY,
+			ACTIVITY,
+			TODAY,
+			NOW_MS,
+		)!;
+		expect(plan.issueReconcile).toEqual({ updatedSince: '2026-07-02', createdFrom: SPAN });
+	});
+
+	it('first sight needs no reconcile (everything is freshly created-fetched)', () => {
+		const plan = planSync(null, SPAN, ACTIVITY, ACTIVITY, TODAY, NOW_MS)!;
+		expect(plan.issueReconcile).toBeNull();
+	});
+
 	it('an expired TTL refreshes even when the watermark day is today', () => {
 		const plan = planSync(
 			row({ fetchedAt: new Date(NOW_MS - 7 * 3600_000) }),
@@ -95,6 +114,7 @@ describe('planSync', () => {
 		expect(plan.factRanges.at(-1)).toEqual({ s: '2025-12-01', e: '2025-12-31' }); // stops before existing facts
 		expect(plan.activityRanges).toEqual([]); // activity window unchanged
 		expect(plan.hasBackfill).toBe(true); // holes in history: must block
+		expect(plan.issueReconcile).toBeNull(); // not stale: no tail, no reconcile
 		expect(plan.next.backfilledFrom).toBe('2025-07-01');
 		expect(plan.next.syncedThrough).toBe(TODAY); // untouched watermark day
 	});
