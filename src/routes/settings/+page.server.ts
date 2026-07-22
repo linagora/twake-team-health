@@ -25,6 +25,12 @@ export const actions: Actions = {
 		if (!isAdmin(locals.user)) return fail(403, { error: 'Admins only' });
 		const fd = await request.formData();
 		const num = (k: string) => Number(fd.get(k));
+		// Comma-separated free-text field → trimmed, non-empty names.
+		const list = (k: string) =>
+			String(fd.get(k) ?? '')
+				.split(',')
+				.map((s) => s.trim())
+				.filter(Boolean);
 
 		const signals: Record<string, number> = {};
 		for (const k of SIGNAL_KEYS) {
@@ -47,14 +53,8 @@ export const actions: Actions = {
 				attentionAgingDays: num('attentionAgingDays'),
 				fetchConcurrency: num('fetchConcurrency'),
 				orgName: String(fd.get('orgName') ?? ''),
-				bugLabels: String(fd.get('bugLabels') ?? '')
-					.split(',')
-					.map((s) => s.trim())
-					.filter(Boolean),
-				bugIssueTypes: String(fd.get('bugIssueTypes') ?? '')
-					.split(',')
-					.map((s) => s.trim())
-					.filter(Boolean),
+				bugLabels: list('bugLabels'),
+				bugIssueTypes: list('bugIssueTypes'),
 				signals
 			});
 			return { saved };

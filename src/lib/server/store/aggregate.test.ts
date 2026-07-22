@@ -92,7 +92,7 @@ const OPTS = {
 	members: MEMBERS,
 	months: MONTHS,
 	memberMonths: MONTHS,
-	isBug: isBug,
+	isBug,
 };
 
 describe('buildStoredRows: repo months', () => {
