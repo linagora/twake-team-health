@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getMetrics } from './metrics-cache';
+import { getFlowReport } from './flow';
 import { getAttention } from './attention-cache';
 import { pruneEvents } from './store/audit';
 import {
@@ -46,15 +47,17 @@ export async function warmAll(): Promise<WarmResult> {
 	const allRepos = dedupeRepos([...globalRepos, ...teams.flatMap((t) => t.repos)]);
 	const targets = (await getAppSettings()).signals;
 
-	// Warm a scope's metrics, then snapshot today's metrics-derived signals (bus
-	// factor, burnout, workload, recovery) for its history timeline. The snapshot is
-	// best-effort and reuses the just-computed metrics, so it adds no GitHub calls.
+	// Warm a scope's metrics + flow, then snapshot today's signals (the rolling
+	// flow checks plus the metrics-derived ones) for its history timeline, so the
+	// 30-day daily trend accumulates going forward. Best-effort and fact-backed, so
+	// it adds no GitHub calls beyond the background tail refresh flow already does.
 	const warmScope = async (selection: Selection) => {
 		const metrics = await getMetrics(selection);
 		try {
+			const flow = await getFlowReport(selection.repos, selection.months, selection.to);
 			await upsertSignalSnapshots(
 				scopeKey(selection.repos),
-				computeSignals(metrics, null, null, targets),
+				computeSignals(metrics, flow, null, targets),
 			);
 		} catch (e) {
 			console.warn(`[warm] signal snapshot failed: ${(e as Error).message}`);

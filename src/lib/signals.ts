@@ -184,7 +184,11 @@ export function computeSignals(
 	const out: Signal[] = [];
 
 	if (flow && flow.overall.count > 0) {
-		const o = flow.overall;
+		// Rolling trailing-30d values when the flow report carries them; otherwise
+		// the whole-window medians (no-DB live path / stale cache).
+		const o = flow.recent?.current ?? flow.overall;
+		const reviewerLoad = flow.recent?.reviewerLoad ?? flow.reviewerLoad;
+		const rollingNote = flow.recent ? ' Rolling last 30 days.' : '';
 		// Complete months (oldest first), excluding the partial current one, drive the
 		// per-signal sparklines so an in-progress month never reads as a dip/spike.
 		const completeMonths = [...flow.byMonth]
@@ -201,7 +205,8 @@ export function computeSignals(
 			value: dur(o.firstReviewHours),
 			target: `under ${t.firstReviewWarnH}h`,
 			detail:
-				'Median wait from opening a PR to its first review. Long waits stall everyone downstream.',
+				'Median wait from opening a PR to its first review. Long waits stall everyone downstream.' +
+				rollingNote,
 			trend: trend((m) => m.firstReviewHours, true),
 		});
 		out.push({
@@ -210,7 +215,7 @@ export function computeSignals(
 			title: 'Cycle time',
 			value: dur(o.mergeHours),
 			target: `under ${dur(t.cycleWarnH)}`,
-			detail: 'Median time from opening a PR to merging it.',
+			detail: 'Median time from opening a PR to merging it.' + rollingNote,
 			trend: trend((m) => m.mergeHours, true),
 		});
 		out.push({
@@ -219,7 +224,7 @@ export function computeSignals(
 			title: 'Review coverage',
 			value: `${o.reviewedPct}%`,
 			target: `at least ${t.reviewedWarnPct}%`,
-			detail: 'Share of merged PRs that got at least one review.',
+			detail: 'Share of merged PRs that got at least one review.' + rollingNote,
 			trend: trend((m) => m.reviewedPct, false),
 		});
 
@@ -272,9 +277,9 @@ export function computeSignals(
 		}
 
 		// Review-load balance: how much of the reviewing one person carries.
-		if (flow.reviewerLoad.length >= t.minReviewers) {
-			const total = flow.reviewerLoad.reduce((sum, r) => sum + r.prs, 0);
-			const top = flow.reviewerLoad.reduce((a, b) => (b.prs > a.prs ? b : a));
+		if (reviewerLoad.length >= t.minReviewers) {
+			const total = reviewerLoad.reduce((sum, r) => sum + r.prs, 0);
+			const top = reviewerLoad.reduce((a, b) => (b.prs > a.prs ? b : a));
 			const pct = total > 0 ? Math.round((top.prs / total) * 100) : 0;
 			out.push({
 				id: 'review-load',
@@ -282,7 +287,7 @@ export function computeSignals(
 				title: 'Review load balance',
 				value: `${pct}%`,
 				target: `under ${t.reviewShareWarnPct}%`,
-				detail: `Reviewing is concentrated on the busiest of ${flow.reviewerLoad.length} reviewers.`,
+				detail: `Reviewing is concentrated on the busiest of ${reviewerLoad.length} reviewers.`,
 				...(pct >= t.reviewShareWarnPct
 					? { people: [{ login: top.reviewer, note: `did ${pct}% of reviews` }] }
 					: {}),
@@ -367,8 +372,14 @@ export function computeSignals(
 	// late at night, judged in the author's own local time (so a 2am commit counts
 	// against the committer wherever they are, not against the server's clock).
 	if (metrics && metrics.workPattern?.length) {
+		// Burnout is a "right now" pattern -> rolling trailing-30d when available.
+		// Recovery deficit needs many weeks (an 8-week streak can't fit in 30 days),
+		// so it stays on the longer window below.
+		const burnoutWp = metrics.recentWorkPattern?.length
+			? metrics.recentWorkPattern
+			: metrics.workPattern;
 		const flagged: { login: string; note: string; level: SignalLevel }[] = [];
-		for (const w of metrics.workPattern) {
+		for (const w of burnoutWp) {
 			if (w.commits < t.burnoutMinCommits) continue;
 			const wkPct = Math.round((w.weekendCommits / w.commits) * 100);
 			const lnPct = Math.round((w.lateNightCommits / w.commits) * 100);
@@ -428,10 +439,15 @@ export function computeSignals(
 	// carrying the team is an overload (and bus-factor) risk. Commits are the unit
 	// (a single, comparable measure); mixing in merged-PR counts would double-count,
 	// since a merged PR's own commits are already in this tally.
-	if (metrics && metrics.authors.length) {
+	if (metrics && (metrics.recentMembers?.length || metrics.authors.length)) {
+		// Rolling trailing-30d commit share when available; else the window sums.
 		const commits = new Map<string, number>();
-		for (const a of metrics.authors)
-			commits.set(a.author, (commits.get(a.author) ?? 0) + a.commits);
+		if (metrics.recentMembers?.length) {
+			for (const m of metrics.recentMembers) if (m.commits > 0) commits.set(m.login, m.commits);
+		} else {
+			for (const a of metrics.authors)
+				commits.set(a.author, (commits.get(a.author) ?? 0) + a.commits);
+		}
 		const total = [...commits.values()].reduce((s, n) => s + n, 0);
 		if (commits.size >= t.minContributors && total >= t.workloadMinTotal) {
 			const [topAuthor, topCommits] = [...commits].reduce((a, b) => (b[1] > a[1] ? b : a));

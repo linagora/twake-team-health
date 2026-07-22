@@ -14,7 +14,7 @@ import {
 	pickCommitMember,
 } from '../github/metrics';
 import { monthKey, monthEnd, monthStartMs, monthEndMs, type Month } from '../github/months';
-import { rollingWindows, type MsWindow } from '../days';
+import { rollingWindows, dayOf, addDays, type MsWindow } from '../days';
 import type { StoredRows, MemberRepoMonthRow, ReviewRepoMonthRow } from './assemble';
 import type {
 	FactBundle,
@@ -22,6 +22,9 @@ import type {
 	Repo,
 	RepoMonth,
 	RecentMember,
+	RecentRepo,
+	DailyCount,
+	WorkPattern,
 	Window30d,
 	WindowCounts,
 	CommitFact,
@@ -254,6 +257,9 @@ export function buildStoredRows(bundle: FactBundle, opts: AggregateOptions): Sto
 export type RecentActivity = {
 	window30d: Window30d;
 	recentMembers: RecentMember[];
+	recentRepos: RecentRepo[];
+	recentDaily: DailyCount[];
+	recentWorkPattern: WorkPattern[];
 };
 
 /** Trailing-30d and prior-30d activity, ending at `endDay` (usually today). */
@@ -277,7 +283,7 @@ export function aggregateRecent(
 		bugs: issues.filter((i) => inWin(i.createdAt, w) && isBug(i.labels)).length,
 	});
 
-	const { byLogin, byEmail } = memberMaps(members);
+	const { byLogin, byEmail, tzByLogin } = memberMaps(members);
 	const byMember = new Map<string, RecentMember>();
 	const member = (login: string) => {
 		let r = byMember.get(login);
@@ -290,15 +296,33 @@ export function aggregateRecent(
 				deletions: 0,
 				reviews: 0,
 				comments: 0,
+				repos: 0,
 			};
 			byMember.set(login, r);
 		}
 		return r;
 	};
+	// Distinct repos each member committed to in the current window (breadth award),
+	// plus the local-time work pattern (weekend / late-night / active weeks) that
+	// feeds the rolling burnout signal.
+	const reposByMember = new Map<string, Set<string>>();
+	type WP = { commits: number; weekend: number; lateNight: number; weeks: Set<number> };
+	const wpByMember = new Map<string, WP>();
 	for (const c of bundle.commits) {
 		if (!want.has(rk(c)) || !inWin(c.committedAt, current)) continue;
 		const login = pickCommitMember(commitAuthor(c), byLogin, byEmail);
-		if (login) member(login).commits += 1;
+		if (!login) continue;
+		member(login).commits += 1;
+		(reposByMember.get(login) ?? reposByMember.set(login, new Set()).get(login)!).add(rk(c));
+		const tz = tzByLogin.get(login);
+		const wp = wpByMember.get(login) ?? { commits: 0, weekend: 0, lateNight: 0, weeks: new Set<number>() };
+		wp.commits += 1;
+		const cls = classifyCommitTime(c.committedDate, tz);
+		if (cls.weekend) wp.weekend += 1;
+		if (cls.lateNight) wp.lateNight += 1;
+		const week = weekIdOf(c.committedDate, tz);
+		if (week !== null) wp.weeks.add(week);
+		wpByMember.set(login, wp);
 	}
 	for (const p of prs) {
 		if (!p.author || !inWin(p.mergedAt, current)) continue;
@@ -318,6 +342,43 @@ export function aggregateRecent(
 		if (f.kind === 'review') member(login).reviews += 1;
 		else member(login).comments += 1;
 	}
+	for (const [login, set] of reposByMember) member(login).repos = set.size;
+
+	// Per-repo trailing-30d activity (current vs previous window) for the
+	// "most active repositories" list, so it stops summing calendar months.
+	const recentRepos: RecentRepo[] = repos.map((repo) => {
+		const key = rk(repo);
+		const rp = prs.filter((p) => rk(p) === key);
+		const ri = issues.filter((i) => rk(i) === key);
+		const rc = (w: MsWindow): WindowCounts => ({
+			created: rp.filter((p) => inWin(p.createdAt, w)).length,
+			merged: rp.filter((p) => inWin(p.mergedAt, w)).length,
+			issues: ri.filter((i) => inWin(i.createdAt, w)).length,
+			bugs: ri.filter((i) => inWin(i.createdAt, w) && isBug(i.labels)).length,
+		});
+		return { owner: repo.owner, repo: repo.repo, current: rc(current), previous: rc(previous) };
+	});
+
+	// Daily headline counts across the whole 2N-day span (previous + current
+	// window), zero-filled so the sparkline is continuous.
+	const daily: DailyCount[] = [];
+	const dayIdx = new Map<string, number>();
+	for (let day = dayOf(new Date(previous.startMs)); day <= endDay; day = addDays(day, 1)) {
+		dayIdx.set(day, daily.length);
+		daily.push({ day, created: 0, merged: 0, bugs: 0 });
+	}
+	const bumpDay = (date: Date | null, field: 'created' | 'merged' | 'bugs') => {
+		if (!date) return;
+		const i = dayIdx.get(dayOf(date));
+		if (i !== undefined) daily[i][field] += 1;
+	};
+	for (const p of prs) {
+		bumpDay(p.createdAt, 'created');
+		bumpDay(p.mergedAt, 'merged');
+	}
+	for (const i of issues) {
+		if (isBug(i.labels)) bumpDay(i.createdAt, 'bugs');
+	}
 
 	return {
 		window30d: {
@@ -326,5 +387,14 @@ export function aggregateRecent(
 			computedAt: generatedAt,
 		},
 		recentMembers: [...byMember.values()].sort((a, b) => b.commits - a.commits),
+		recentRepos,
+		recentDaily: daily,
+		recentWorkPattern: [...wpByMember.entries()].map(([author, wp]) => ({
+			author,
+			commits: wp.commits,
+			weekendCommits: wp.weekend,
+			lateNightCommits: wp.lateNight,
+			activeWeeks: [...wp.weeks].sort((a, b) => a - b),
+		})),
 	};
 }

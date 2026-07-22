@@ -101,6 +101,26 @@ export type RecentMember = {
 	deletions: number;
 	reviews: number;
 	comments: number;
+	/** Distinct repos the member committed to in the window (breadth award). */
+	repos: number;
+};
+
+/** One repository's activity over the current vs previous rolling window, so the
+ * "most active repos" list is a trailing-30d view with a vs-previous delta. */
+export type RecentRepo = {
+	owner: string;
+	repo: string;
+	current: WindowCounts;
+	previous: WindowCounts;
+};
+
+/** One day's headline counts (UTC), for the rolling sparklines that replace the
+ * monthly-bucket sparklines beside the trailing-30d hero numbers. */
+export type DailyCount = {
+	day: string; // "YYYY-MM-DD"
+	created: number;
+	merged: number;
+	bugs: number;
 };
 
 export type MetricsResult = {
@@ -116,6 +136,13 @@ export type MetricsResult = {
 	window30d?: Window30d;
 	/** Per-member trailing-30d activity for leaderboards. */
 	recentMembers?: RecentMember[];
+	/** Per-repo trailing-30d activity (current vs previous window). */
+	recentRepos?: RecentRepo[];
+	/** Daily headline counts over the trailing window, for rolling sparklines. */
+	recentDaily?: DailyCount[];
+	/** Per-member work pattern over the trailing 30d (weekend/late-night/active
+	 * weeks), for the rolling burnout signal. */
+	recentWorkPattern?: WorkPattern[];
 	generatedAt: number;
 };
 
@@ -297,5 +324,9 @@ export type FlowResult = {
 	reviewerLoad: ReviewerLoad[]; // distinct PRs each person reviewed
 	botActivity: BotActivity[]; // automated reviewers, busiest first
 	botByMonth: BotMonthActivity[]; // bot activity per month, for trends
+	/** Rolling trailing-30d flow (current vs previous window) + the current
+	 * window's reviewer load. Drives the rolling flow signals; absent on the
+	 * no-DB live path, where signals fall back to the whole-window medians. */
+	recent?: { current: FlowStats; previous: FlowStats; reviewerLoad: ReviewerLoad[] };
 	generatedAt: number;
 };
