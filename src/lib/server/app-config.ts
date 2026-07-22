@@ -26,8 +26,11 @@ export type AppSettings = {
 	fetchConcurrency: number;
 	// Optional organization name shown in the sidebar brand.
 	orgName: string;
-	// Label names that mark an issue as a bug; empty = the default word-"bug" heuristic.
+	// Label names that mark an issue as a bug, added on top of the default
+	// word-"bug"/"defect" heuristic (empty = heuristic only).
 	bugLabels: string[];
+	// GitHub native issue-type names that mark an issue as a bug; empty = "Bug".
+	bugIssueTypes: string[];
 };
 
 const CONFIG_ID = 'app';
@@ -46,7 +49,8 @@ function envSettings(): AppSettings {
 		attentionAgingDays: days(env.ATTENTION_AGING_DAYS) ?? 14,
 		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8,
 		orgName: env.ORG_NAME ?? '',
-		bugLabels: []
+		bugLabels: [],
+		bugIssueTypes: []
 	};
 }
 
@@ -78,6 +82,16 @@ function sanitizeTargets(o: unknown): Targets | undefined {
 	return any ? merged : undefined;
 }
 
+// Trim, length-cap, drop blanks/non-strings, and bound the count of a free-text
+// name list (bug labels, bug issue types).
+function cleanNames(xs: unknown[]): string[] {
+	return xs
+		.filter((l): l is string => typeof l === 'string')
+		.map((l) => l.trim().slice(0, 40))
+		.filter(Boolean)
+		.slice(0, 30);
+}
+
 /** Normalize an untrusted overrides object: repos are allowlist-validated and
  * windows clamped; invalid/unknown fields are dropped. */
 function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
@@ -101,13 +115,8 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	const fc = Number(o.fetchConcurrency);
 	if (Number.isInteger(fc) && fc >= 1 && fc <= 32) out.fetchConcurrency = fc;
 	if (typeof o.orgName === 'string') out.orgName = o.orgName.trim().slice(0, 60);
-	if (Array.isArray(o.bugLabels)) {
-		out.bugLabels = o.bugLabels
-			.filter((l): l is string => typeof l === 'string')
-			.map((l) => l.trim().slice(0, 40))
-			.filter(Boolean)
-			.slice(0, 30);
-	}
+	if (Array.isArray(o.bugLabels)) out.bugLabels = cleanNames(o.bugLabels);
+	if (Array.isArray(o.bugIssueTypes)) out.bugIssueTypes = cleanNames(o.bugIssueTypes);
 	return out;
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildStoredRows, aggregateRecent } from './aggregate';
-import { isBugLabel } from '../github/stats';
+import { makeBugMatcher } from '../github/stats';
 import type {
 	FactBundle,
 	Member,
@@ -40,8 +40,11 @@ const issue = (o: Partial<IssueFact>): IssueFact => ({
 	createdAt: d('2026-06-01T00:00:00Z'),
 	closedAt: null,
 	labels: [],
+	issueType: null,
 	...o,
 });
+
+const isBug = makeBugMatcher();
 
 const commit = (o: Partial<CommitFact>): CommitFact => ({
 	owner: 'linagora',
@@ -89,7 +92,7 @@ const OPTS = {
 	members: MEMBERS,
 	months: MONTHS,
 	memberMonths: MONTHS,
-	isBug: isBugLabel,
+	isBug,
 };
 
 describe('buildStoredRows: repo months', () => {
@@ -175,6 +178,17 @@ describe('buildStoredRows: repo months', () => {
 		expect(june.bugs).toBe(2);
 		expect(june.resolutionDays).toBe(10); // the one closed bug
 		expect(june.resolutionRate).toBe(50); // 1 of 2 bugs closed
+	});
+
+	it('classifies an unlabeled issue as a bug from its native issue type', () => {
+		const bundle = empty();
+		bundle.issues = [
+			issue({ number: 1, createdAt: d('2026-06-01T00:00:00Z'), issueType: 'Bug' }), // no label
+			issue({ number: 2, createdAt: d('2026-06-02T00:00:00Z'), issueType: 'Task' }),
+		];
+		const june = buildStoredRows(bundle, OPTS).repoRows.find((r) => r.month === '2026-06')!;
+		expect(june.issues).toBe(2);
+		expect(june.bugs).toBe(1); // only the Bug-typed issue, despite neither being labeled
 	});
 
 	it('reads open stock from the latest snapshot at or before each month end', () => {
@@ -324,7 +338,7 @@ describe('aggregateRecent', () => {
 			}),
 			issue({ number: 2, createdAt: d('2026-05-20T00:00:00Z') }),
 		];
-		const { window30d } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 123);
+		const { window30d } = aggregateRecent(bundle, [REPO], MEMBERS, isBug, END, 123);
 		expect(window30d.current).toEqual({
 			created: 1,
 			merged: 1,
@@ -374,7 +388,7 @@ describe('aggregateRecent', () => {
 				ts: d('2026-06-25T01:00:00Z'),
 			}),
 		];
-		const { recentMembers } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		const { recentMembers } = aggregateRecent(bundle, [REPO], MEMBERS, isBug, END, 0);
 		expect(recentMembers.find((r) => r.login === 'alice')).toMatchObject({
 			commits: 1,
 			mergedPrs: 1,
@@ -389,7 +403,7 @@ describe('aggregateRecent', () => {
 	it('ignores repos outside the selection', () => {
 		const bundle = empty();
 		bundle.prs = [pr({ repo: 'other', number: 1, createdAt: d('2026-07-01T00:00:00Z') })];
-		const { window30d } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		const { window30d } = aggregateRecent(bundle, [REPO], MEMBERS, isBug, END, 0);
 		expect(window30d.current.created).toBe(0);
 	});
 
@@ -403,7 +417,7 @@ describe('aggregateRecent', () => {
 			commit({ oid: 'c1', repo: 'c', committedAt: d('2026-05-10T10:00:00Z'), committedDate: '2026-05-10T10:00:00Z' }),
 		];
 		const repos = [REPO, { owner: 'linagora', repo: 'b' }, { owner: 'linagora', repo: 'c' }];
-		const { recentMembers } = aggregateRecent(bundle, repos, MEMBERS, isBugLabel, END, 0);
+		const { recentMembers } = aggregateRecent(bundle, repos, MEMBERS, isBug, END, 0);
 		expect(recentMembers.find((r) => r.login === 'alice')).toMatchObject({ commits: 3, repos: 2 });
 	});
 
@@ -415,7 +429,7 @@ describe('aggregateRecent', () => {
 			pr({ repo: 'b', number: 3, createdAt: d('2026-06-20T00:00:00Z') }), // current, created only
 		];
 		const repos = [REPO, { owner: 'linagora', repo: 'b' }];
-		const { recentRepos } = aggregateRecent(bundle, repos, MEMBERS, isBugLabel, END, 0);
+		const { recentRepos } = aggregateRecent(bundle, repos, MEMBERS, isBug, END, 0);
 		const a = recentRepos.find((r) => r.repo === 'a')!;
 		expect(a.current.merged).toBe(1);
 		expect(a.previous.merged).toBe(1);
@@ -432,7 +446,7 @@ describe('aggregateRecent', () => {
 			// previous window: excluded from the rolling pattern
 			commit({ oid: 'w3', committedDate: '2026-05-10T10:00:00Z', committedAt: d('2026-05-10T10:00:00Z') }),
 		];
-		const { recentWorkPattern } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		const { recentWorkPattern } = aggregateRecent(bundle, [REPO], MEMBERS, isBug, END, 0);
 		const a = recentWorkPattern.find((w) => w.author === 'alice')!;
 		expect(a.commits).toBe(2);
 		expect(a.activeWeeks.length).toBeGreaterThan(0);
@@ -442,7 +456,7 @@ describe('aggregateRecent', () => {
 		const bundle = empty();
 		bundle.prs = [pr({ number: 1, createdAt: d('2026-06-20T00:00:00Z'), mergedAt: d('2026-07-01T12:00:00Z') })];
 		bundle.issues = [issue({ number: 1, createdAt: d('2026-06-25T00:00:00Z'), labels: ['bug'] })];
-		const { recentDaily } = aggregateRecent(bundle, [REPO], MEMBERS, isBugLabel, END, 0);
+		const { recentDaily } = aggregateRecent(bundle, [REPO], MEMBERS, isBug, END, 0);
 		expect(recentDaily.length).toBe(60);
 		expect(recentDaily[0].day).toBe('2026-05-07');
 		expect(recentDaily.at(-1)!.day).toBe('2026-07-05');

@@ -77,6 +77,7 @@ export async function upsertIssueFacts(rows: IssueFact[]): Promise<void> {
 					createdAt: sqlExcluded('created_at'),
 					closedAt: sqlExcluded('closed_at'),
 					labels: sqlExcluded('labels'),
+					issueType: sqlExcluded('issue_type'),
 					fetchedAt: sql`now()`,
 				},
 			});

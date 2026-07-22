@@ -1,5 +1,5 @@
 import { type GraphQL } from './client';
-import { median, round, isBugLabel, makeBugMatcher } from './stats';
+import { median, round, makeBugMatcher, type BugSignal } from './stats';
 import { type Month, monthKey, monthStart, monthEnd, monthStartMs, monthEndMs } from './months';
 import type {
 	Repo,
@@ -97,12 +97,13 @@ type IssueNode = {
 	createdAt: string;
 	closedAt: string | null;
 	labels: { nodes: { name: string }[] };
+	issueType?: string | null;
 };
 
 export function issueStatsForMonth(
 	opened: { issueCount: number; nodes: IssueNode[] },
 	closedCount: number,
-	isBug: (labels: string[]) => boolean = isBugLabel,
+	isBug: (s: BugSignal) => boolean = makeBugMatcher(),
 ): {
 	opened: number;
 	closed: number;
@@ -115,7 +116,7 @@ export function issueStatsForMonth(
 	for (const issue of opened.nodes) {
 		if (!issue) continue; // partial 200s can null individual search nodes
 		const labels = issue.labels?.nodes?.map((l) => l.name) ?? [];
-		if (isBug(labels)) {
+		if (isBug({ labels, issueType: issue.issueType ?? null })) {
 			bugs += 1;
 			if (issue.closedAt) {
 				resolutionDaysList.push(
@@ -282,7 +283,7 @@ async function runChunkedAliases(
 // raw; all classification (bug labels, member attribution, windows) happens at
 // read time in the aggregator.
 const PR_FACT_FIELDS = `... on PullRequest { number author { login } createdAt mergedAt closedAt additions deletions comments { totalCount } reviews { totalCount } }`;
-const ISSUE_FACT_FIELDS = `... on Issue { number createdAt closedAt labels(first: 10) { nodes { name } } }`;
+const ISSUE_FACT_FIELDS = `... on Issue { number createdAt closedAt labels(first: 10) { nodes { name } } issueType { name } }`;
 const REVIEW_FACT_PR_FIELDS = `... on PullRequest { number author { login } reviews(first: 100) { nodes { id author { login __typename avatarUrl } submittedAt state comments { totalCount } } } comments(first: 100) { nodes { id author { login __typename avatarUrl } createdAt } } }`;
 const FLOW_PR_NODE_FIELDS = `... on PullRequest { createdAt mergedAt reviews(first: 100) { nodes { submittedAt state author { login __typename avatarUrl } comments { totalCount } } } }`;
 
@@ -352,6 +353,10 @@ async function searchAllNodes(gql: GraphQL, query: string, fields: string): Prom
 // bug variants when none set). Values with spaces/colons are quoted, escaped for
 // the surrounding GraphQL string. Search is label-exact, so this is the closest
 // approximation of the bug matcher for the cumulative stock counts.
+// LIMITATION: GitHub issue search cannot filter on native issue types, so the
+// open-bug STOCK (bugsOpen) stays label-based. A team that types issues but does
+// not label them will see the per-window "bugs raised" flow reflect reality while
+// bugsOpen under-counts. Accepted: deriving stock from stored facts is out of scope.
 function bugLabelSearch(configured: string[]): string {
 	const labels = configured.length
 		? configured
@@ -474,6 +479,7 @@ export async function fetchIssueFactRows(
 					createdAt: new Date(issue.createdAt),
 					closedAt: dateOrNull(issue.closedAt),
 					labels: (issue.labels?.nodes ?? []).map((l: { name: string }) => l?.name).filter(Boolean),
+					issueType: issue.issueType?.name ?? null,
 				});
 			}
 		}

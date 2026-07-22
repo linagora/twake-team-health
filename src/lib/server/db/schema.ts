@@ -158,6 +158,9 @@ export const issueFact = pgTable(
 		closedAt: timestamp('closed_at', { withTimezone: true }),
 		// Raw label names; the (configurable) bug matcher classifies at read time.
 		labels: jsonb('labels').$type<string[]>().notNull().default([]),
+		// GitHub native issue type name (e.g. "Bug"); a second defect signal beyond
+		// labels. Null when the issue has no type, or predates this column's backfill.
+		issueType: text('issue_type'),
 		fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
 	},
 	(t) => [

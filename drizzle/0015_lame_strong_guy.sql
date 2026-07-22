@@ -1,0 +1,1 @@
+ALTER TABLE "issue_fact" ADD COLUMN "issue_type" text;

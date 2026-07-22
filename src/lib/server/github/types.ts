@@ -168,6 +168,8 @@ export type IssueFact = {
 	createdAt: Date;
 	closedAt: Date | null;
 	labels: string[];
+	// GitHub native issue type name (e.g. "Bug"); null when untyped/not-yet-fetched.
+	issueType: string | null;
 };
 
 export type CommitFact = {
