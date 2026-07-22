@@ -286,6 +286,21 @@ export const team = pgTable(
 	(t) => [index('team_owner_idx').on(t.ownerSub)],
 );
 
+// Global, ownerless overrides of the env-configured default (built-in) teams.
+// Any signed-in user may edit a default team in place; the edit is shared with
+// everyone and keyed by the preset's positional built-in id (builtin:N). An
+// absent row falls back to the env DEFAULT_TEAMS preset, so deleting a row resets
+// the team to its configured default. Shape mirrors the per-user `team` table.
+export const defaultTeamOverride = pgTable('default_team_override', {
+	builtinId: text('builtin_id').primaryKey(), // e.g. 'builtin:0' / 'builtin:default'
+	name: text('name').notNull(),
+	members: jsonb('members').$type<Member[]>().notNull(),
+	repos: jsonb('repos').$type<Repo[]>().notNull(),
+	tz: text('tz'),
+	lastEditedBy: text('last_edited_by'), // OIDC sub of the last editor
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Singleton app-wide configuration overrides (admin-editable). Each key that is
 // absent falls back to its environment default, so an empty/missing row leaves
 // behavior identical to a pure env configuration.

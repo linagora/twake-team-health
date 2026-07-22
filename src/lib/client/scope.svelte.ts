@@ -180,6 +180,29 @@ class ScopeStore {
 		if (id === this.activeTeamId) this.reload();
 	}
 
+	/** Edit a built-in default team in place. The override is global (shared with
+	 * every user) and requires server persistence, so there is no localStorage path. */
+	async updateDefaultTeam(id: string, input: TeamInput): Promise<void> {
+		const res = await fetch(`/api/default-teams/${id}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(input)
+		});
+		if (!res.ok) throw new Error(await res.text());
+		const team = (await res.json()).team as Team;
+		this.teams = this.teams.map((t) => (t.id === id ? team : t));
+		if (id === this.activeTeamId) this.reload();
+	}
+
+	/** Clear a built-in team's override, reverting it to the env preset. */
+	async resetDefaultTeam(id: string): Promise<void> {
+		const res = await fetch(`/api/default-teams/${id}`, { method: 'DELETE' });
+		if (!res.ok) throw new Error(await res.text());
+		const team = (await res.json()).team as Team | undefined;
+		if (team) this.teams = this.teams.map((t) => (t.id === id ? { ...team, builtin: true } : t));
+		if (id === this.activeTeamId) this.reload();
+	}
+
 	async deleteTeam(id: string): Promise<void> {
 		if (this.persisted) {
 			const res = await fetch(`/api/teams/${id}`, { method: 'DELETE' });
