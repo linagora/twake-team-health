@@ -2,6 +2,8 @@ import { env } from '$env/dynamic/private';
 import type { Selection, Member, Repo } from './github/types';
 import { DEFAULT_TEAM_ID, type Team } from '$lib/client/selection';
 import { isValidTimeZone, withTeamTz } from '$lib/tz';
+import { hasDb } from './db';
+import { listDefaultTeamOverrides, type DefaultTeamOverride } from './store/default-teams';
 
 // The default team is CONFIGURATION, not source: set DEFAULT_TEAM to a JSON blob
 // ({ name, members:[{login,name,email?}], repos:[{owner,repo}] }) so the team can
@@ -51,6 +53,47 @@ export function defaultTeams(): Team[] {
 		...(t.tz ? { tz: t.tz } : {}),
 		builtin: true
 	}));
+}
+
+/** Overlay stored global overrides onto the env presets (pure). An override
+ * replaces its preset entirely, matched by built-in id, and marks the team
+ * `overridden` so the UI can offer a reset. Presets without an override stand. */
+export function applyDefaultTeamOverrides(presets: Team[], overrides: Map<string, DefaultTeamOverride>): Team[] {
+	if (overrides.size === 0) return presets;
+	return presets.map((t) => {
+		const o = overrides.get(t.id);
+		if (!o) return t;
+		return { id: t.id, name: o.name, members: o.members, repos: o.repos, ...(o.tz ? { tz: o.tz } : {}), builtin: true, overridden: true };
+	});
+}
+
+// The layout load resolves default teams on every SSR request, so cache the
+// merged result behind a short TTL (mirrors app-config's cache: accepts up to the
+// TTL of cross-replica staleness). Writers clear it in-process via the exported
+// helper so the editing replica sees its own change immediately.
+const TEAMS_TTL_MS = 60_000;
+let teamsCache: { value: Team[]; expires: number } | null = null;
+
+/** Drop the resolved-default-teams cache so the next read reflects a just-written
+ * override. Call after upserting/deleting an override. */
+export function clearDefaultTeamsCache(): void {
+	teamsCache = null;
+}
+
+/** Effective default teams: env presets with any stored global overrides applied.
+ * Falls back to the pure env presets when no DB is configured or the read fails,
+ * so a transient DB outage can't blank out the default teams. */
+export async function resolveDefaultTeams(): Promise<Team[]> {
+	const presets = defaultTeams();
+	if (!hasDb()) return presets;
+	if (teamsCache && teamsCache.expires > Date.now()) return teamsCache.value;
+	try {
+		const value = applyDefaultTeamOverrides(presets, await listDefaultTeamOverrides());
+		teamsCache = { value, expires: Date.now() + TEAMS_TTL_MS };
+		return value;
+	} catch {
+		return presets; // not cached, so a recovered DB is picked up on the next call
+	}
 }
 
 export const DEFAULT_MONTHS = Number(env.DEFAULT_MONTHS ?? 12);

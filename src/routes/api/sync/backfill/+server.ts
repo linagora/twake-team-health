@@ -4,7 +4,7 @@ import { getSyncStatus } from '$lib/server/store';
 import { ensureFactsSynced } from '$lib/server/sync';
 import { getAppSettings } from '$lib/server/app-config';
 import { lastNMonths, monthStart } from '$lib/server/github/months';
-import { defaultTeams, defaultGlobalRepos } from '$lib/server/preset';
+import { resolveDefaultTeams, defaultGlobalRepos } from '$lib/server/preset';
 import { hasDb } from '$lib/server/db';
 import { audit } from '$lib/server/store/audit';
 import type { Repo } from '$lib/server/github/types';
@@ -31,7 +31,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// Every repo the app knows about: configured teams + global list + anything
 		// already synced (covers custom-team repos not in the presets).
 		const known = new Map<string, Repo>();
-		for (const t of defaultTeams())
+		for (const t of await resolveDefaultTeams())
 			for (const r of t.repos) known.set(rk(r), { owner: r.owner, repo: r.repo });
 		for (const r of defaultGlobalRepos()) known.set(rk(r), { owner: r.owner, repo: r.repo });
 		for (const r of await getSyncStatus()) known.set(rk(r), { owner: r.owner, repo: r.repo });

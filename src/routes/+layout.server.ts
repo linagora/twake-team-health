@@ -1,4 +1,4 @@
-import { defaultTeams } from '$lib/server/preset';
+import { resolveDefaultTeams } from '$lib/server/preset';
 import { allowedOrgs } from '$lib/server/discovery';
 import { AUTH_DISABLED, isAdmin } from '$lib/server/auth';
 import { hasDb } from '$lib/server/db';
@@ -8,7 +8,7 @@ import type { LayoutServerLoad } from './$types';
 export const load: LayoutServerLoad = async ({ locals }) => {
 	const settings = await getAppSettings();
 	return {
-		defaultTeams: defaultTeams(),
+		defaultTeams: await resolveDefaultTeams(),
 		allowedOrgs: allowedOrgs(),
 		defaults: { months: settings.defaultMonths, memberMonths: settings.defaultMemberMonths },
 		global: { repos: settings.globalRepos, months: settings.globalMonths },

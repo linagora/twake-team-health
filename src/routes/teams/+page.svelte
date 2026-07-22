@@ -10,7 +10,7 @@
 
 	// IANA zones for the timezone pickers (burnout/recovery classify commits in local time).
 	const timeZones = commonTimeZones();
-	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search, Copy } from '@lucide/svelte';
+	import { Plus, Pencil, Trash2, Check, Users, GitBranch, Loader2, Search, Copy, RotateCcw } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 
@@ -22,6 +22,10 @@
 	const persistenceNote = untrack(() => data.teamsPersisted)
 		? 'Your teams are saved to your account.'
 		: 'Your teams are saved in this browser.';
+
+	// Default teams can be edited in place only when server persistence is on: the
+	// override is global (shared with everyone), which localStorage can't express.
+	const canEditDefaults = untrack(() => data.teamsPersisted);
 
 	$effect(() => {
 		discovery.ensure();
@@ -40,6 +44,8 @@
 
 	type Draft = {
 		id: string | null;
+		// True when editing a built-in default team in place (saves a global override).
+		builtin: boolean;
 		name: string;
 		members: Set<string>;
 		repos: Set<string>;
@@ -56,7 +62,7 @@
 	let repoQuery = $state('');
 
 	function startNew() {
-		draft = { id: null, name: '', members: new Set(), repos: new Set(), noReleases: new Set(), tz: '', memberTz: new Map() };
+		draft = { id: null, builtin: false, name: '', members: new Set(), repos: new Set(), noReleases: new Set(), tz: '', memberTz: new Map() };
 		viewing = null;
 		memberQuery = '';
 		repoQuery = '';
@@ -72,6 +78,7 @@
 	function startFrom(t: Team) {
 		draft = {
 			id: null,
+			builtin: false,
 			name: `${t.name} copy`,
 			members: new Set(t.members.map((m) => m.login)),
 			repos: new Set(t.repos.map(repoKey)),
@@ -88,6 +95,7 @@
 		if (!t) return;
 		draft = {
 			id: t.id,
+			builtin: !!t.builtin,
 			name: t.name,
 			members: new Set(t.members.map((m) => m.login)),
 			repos: new Set(t.repos.map(repoKey)),
@@ -101,6 +109,19 @@
 	}
 	function cancel() {
 		draft = null;
+	}
+	// Clear a built-in team's global override, reverting it to the configured default.
+	let resetting = $state<string | null>(null);
+	async function resetDefault(t: Team) {
+		if (resetting) return; // guard against a double-click firing two DELETEs
+		if (!confirm(`Reset "${t.name}" to its configured default? This affects everyone.`)) return;
+		resetting = t.id;
+		try {
+			await scope.resetDefaultTeam(t.id);
+			if (viewing?.id === t.id) viewing = scope.teams.find((x) => x.id === t.id) ?? null;
+		} finally {
+			resetting = null;
+		}
 	}
 	function setMemberTz(login: string, value: string) {
 		if (!draft) return;
@@ -133,7 +154,8 @@
 			// Always send tz (even '') so clearing the team default propagates to the
 			// optimistic in-memory team, not just the server (which nulls an empty tz).
 			const input = { name: draft.name.trim(), members, repos, tz: draft.tz };
-			if (draft.id) await scope.updateTeam(draft.id, input);
+			if (draft.id && draft.builtin) await scope.updateDefaultTeam(draft.id, input);
+			else if (draft.id) await scope.updateTeam(draft.id, input);
 			else await scope.addTeam(input);
 			draft = null;
 		} catch (e) {
@@ -211,6 +233,7 @@
 								<div class="flex items-center gap-2">
 									<span class="font-display text-base text-[var(--color-ink-950)] truncate">{t.name}</span>
 									{#if t.builtin}<span class="rounded bg-[var(--color-ink-100)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-ink-600)]">default</span>{/if}
+									{#if t.overridden}<span class="rounded bg-[var(--color-brand)]/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-brand)]">edited</span>{/if}
 								</div>
 								<div class="mt-1 flex items-center gap-3 font-mono text-[11px] text-[var(--color-ink-600)]">
 									<span class="inline-flex items-center gap-1"><Users class="h-3 w-3" />{t.members.length}</span>
@@ -226,9 +249,13 @@
 								<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); startFrom(t); }} aria-label="Duplicate team">
 									<Copy class="h-3.5 w-3.5" />
 								</Button>
-								{#if !t.builtin}
+								{#if !t.builtin || canEditDefaults}
 									<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); startEdit(t.id); }} aria-label="Edit"><Pencil class="h-3.5 w-3.5" /></Button>
+								{/if}
+								{#if !t.builtin}
 									<Button size="icon-xs" variant="ghost" onclick={(e) => { e.stopPropagation(); scope.deleteTeam(t.id); }} aria-label="Delete"><Trash2 class="h-3.5 w-3.5 text-[var(--color-negative)]" /></Button>
+								{:else if canEditDefaults && t.overridden}
+									<Button size="icon-xs" variant="ghost" disabled={resetting === t.id} onclick={(e) => { e.stopPropagation(); resetDefault(t); }} aria-label="Reset to default"><RotateCcw class="h-3.5 w-3.5" /></Button>
 								{/if}
 							</div>
 						</div>
@@ -251,9 +278,10 @@
 						<div class="flex items-center gap-2">
 							<span class="font-display text-xl text-[var(--color-ink-950)]">{viewing.name}</span>
 							{#if viewing.builtin}<span class="rounded bg-[var(--color-ink-100)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-ink-600)]">default</span>{/if}
+							{#if viewing.overridden}<span class="rounded bg-[var(--color-brand)]/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-brand)]">edited</span>{/if}
 						</div>
 						<p class="mt-1.5 text-sm text-[var(--color-ink-600)]">
-							{#if viewing.builtin}A preconfigured team. Duplicate it to make your own editable copy.{:else}The members and repositories in this team.{/if}
+							{#if viewing.builtin && canEditDefaults}A shared default team. Editing it changes what everyone sees; reset returns it to the configured default.{:else if viewing.builtin}A preconfigured team. Duplicate it to make your own editable copy.{:else}The members and repositories in this team.{/if}
 						</p>
 					</div>
 
@@ -303,9 +331,14 @@
 						<Button variant="outline" onclick={() => viewing && startFrom(viewing)}>
 							<Copy class="h-4 w-4" /> Duplicate to a new team
 						</Button>
-						{#if viewing && !viewing.builtin}
+						{#if viewing && (!viewing.builtin || canEditDefaults)}
 							<Button variant="outline" onclick={() => viewing && startEdit(viewing.id)}>
 								<Pencil class="h-4 w-4" /> Edit
+							</Button>
+						{/if}
+						{#if viewing && viewing.builtin && canEditDefaults && viewing.overridden}
+							<Button variant="outline" disabled={resetting === viewing.id} onclick={() => viewing && resetDefault(viewing)}>
+								<RotateCcw class="h-4 w-4" /> Reset to default
 							</Button>
 						{/if}
 						<Button variant="ghost" onclick={() => (viewing = null)}>Close</Button>

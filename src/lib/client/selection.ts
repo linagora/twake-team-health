@@ -10,6 +10,8 @@ export type Team = {
 	/** Default IANA timezone for the team; members inherit it unless they set their own. */
 	tz?: string;
 	builtin?: boolean;
+	/** A built-in team currently carrying a stored global override (can be reset). */
+	overridden?: boolean;
 };
 
 export type Scope = {
