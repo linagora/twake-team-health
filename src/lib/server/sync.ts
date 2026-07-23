@@ -32,6 +32,10 @@ const SYNC_TTL_MS = Number.isFinite(ttlEnv) && ttlEnv >= 0 ? ttlEnv : 6 * 60 * 6
 export type SyncPlan = {
 	/** PR/issue ranges to fetch (backfill extension + refresh tail), month-sliced. */
 	factRanges: DayRange[];
+	/** Reconcile late label/issue-type edits on a refresh: re-pull in-span issues
+	 * updated since this day, regardless of when they were created. Null on the
+	 * first backfill (everything is freshly created-fetched) and when not stale. */
+	issueReconcile: { updatedSince: string; createdFrom: string } | null;
 	/** Commit ranges (member window only — the heaviest fetches). */
 	activityRanges: DayRange[];
 	/** Review ranges (flow window; wider than commits, cheaper per month). */
@@ -77,6 +81,7 @@ export function planSync(
 		// First sight of this repo: backfill everything up to today.
 		return {
 			factRanges: monthSlicedRanges(spanStartDay, todayDay),
+			issueReconcile: null,
 			activityRanges: monthSlicedRanges(activityStartDay, todayDay),
 			reviewRanges: monthSlicedRanges(reviewStartDay, todayDay),
 			releaseSince: spanStartDay,
@@ -96,6 +101,9 @@ export function planSync(
 	const reviewRanges: DayRange[] = [];
 	const stockDaysOut: string[] = [];
 	let releaseSince: string | null = null;
+	let issueReconcile: SyncPlan['issueReconcile'] = null;
+	// Widest span ever synced for this repo: the created lower bound for reconcile.
+	const backfilledFrom = spanStartDay < row.backfilledFrom ? spanStartDay : row.backfilledFrom;
 
 	// Backwards extensions: a wider window than ever synced before.
 	if (spanStartDay < row.backfilledFrom) {
@@ -130,18 +138,22 @@ export function planSync(
 		reviewRanges.push(...tail);
 		stockDaysOut.push(todayDay);
 		if (releaseSince === null) releaseSince = from;
+		// Late label/type edits on older in-span issues are invisible to the
+		// created/closed tail; reconcile them by their update time.
+		issueReconcile = { updatedSince: from, createdFrom: backfilledFrom };
 	}
 
 	if (!factRanges.length && !activityRanges.length && !reviewRanges.length) return null;
 	return {
 		factRanges,
+		issueReconcile,
 		activityRanges,
 		reviewRanges,
 		releaseSince,
 		stockDays: [...new Set(stockDaysOut)],
 		hasBackfill,
 		next: {
-			backfilledFrom: spanStartDay < row.backfilledFrom ? spanStartDay : row.backfilledFrom,
+			backfilledFrom,
 			activityBackfilledFrom:
 				activityStartDay < row.activityBackfilledFrom
 					? activityStartDay
@@ -166,7 +178,9 @@ async function executeSync(
 	// throttle, so per-repo serialization only added wall-clock.
 	const [prs, issues, reviews, releases, stocks, commitBatches] = await Promise.all([
 		plan.factRanges.length ? fetchPrFactRows(gql, repo, plan.factRanges) : [],
-		plan.factRanges.length ? fetchIssueFactRows(gql, repo, plan.factRanges) : [],
+		plan.factRanges.length || plan.issueReconcile
+			? fetchIssueFactRows(gql, repo, plan.factRanges, plan.issueReconcile ?? undefined)
+			: [],
 		plan.reviewRanges.length ? fetchReviewFactRows(gql, repo, plan.reviewRanges) : [],
 		plan.releaseSince ? fetchReleaseFactRows(gql, repo, plan.releaseSince) : [],
 		plan.stockDays.length ? fetchStockAsOf(gql, repo, plan.stockDays, bugLabels) : [],

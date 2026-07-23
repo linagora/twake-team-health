@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	prStatsForMonth,
 	issueStatsForMonth,
+	fetchIssueFactRows,
 	pickCommitMember,
 	commitLocalTime,
 	classifyCommitTime,
@@ -9,6 +10,22 @@ import {
 } from './metrics';
 import { median, std, isBugLabel, makeBugMatcher } from './stats';
 import { lastNMonths, monthKey, monthEnd } from './months';
+import type { GraphQL } from './client';
+
+// Fake GraphQL that pulls the inner search query out of each request and returns
+// canned issue nodes per query, so fetch functions can be tested without network.
+function fakeIssueGql(nodesFor: (innerQuery: string) => unknown[]): {
+	gql: GraphQL;
+	queries: string[];
+} {
+	const queries: string[] = [];
+	const gql: GraphQL = async (q: string) => {
+		const inner = /search\(query: "([^"]*)"/.exec(q)?.[1] ?? '';
+		queries.push(inner);
+		return { search: { nodes: nodesFor(inner), pageInfo: { hasNextPage: false } } };
+	};
+	return { gql, queries };
+}
 
 describe('stats helpers', () => {
 	it('median handles odd and even counts', () => {
@@ -140,6 +157,52 @@ describe('issueStatsForMonth', () => {
 		const s = issueStatsForMonth(opened, 0);
 		expect(s.opened).toBe(2);
 		expect(s.bugs).toBe(1);
+	});
+});
+
+describe('fetchIssueFactRows', () => {
+	const node = (o: Record<string, unknown>) => ({
+		closedAt: null,
+		labels: { nodes: [] },
+		issueType: null,
+		...o,
+	});
+
+	it('queries created and closed windows for each range', async () => {
+		const { gql, queries } = fakeIssueGql(() => []);
+		await fetchIssueFactRows(gql, { owner: 'o', repo: 'r' }, [{ s: '2026-07-02', e: '2026-07-05' }]);
+		expect(queries).toContain('repo:o/r type:issue created:2026-07-02..2026-07-05');
+		expect(queries).toContain('repo:o/r type:issue is:closed closed:2026-07-02..2026-07-05');
+		expect(queries.some((q) => q.includes('updated:'))).toBe(false); // no reconcile without the option
+	});
+
+	it('reconciles issues updated since a day, beyond the created/closed windows', async () => {
+		// The relabeled issue was created outside the tail and never closed, so only
+		// the `updated:` reconcile query surfaces it (the created/closed windows return
+		// nothing). Its fresh labels must land in the result.
+		const { gql, queries } = fakeIssueGql((q) =>
+			q.includes('updated:>=')
+				? [node({ number: 7, createdAt: '2025-08-01T00:00:00Z', labels: { nodes: [{ name: 'bug' }] } })]
+				: [],
+		);
+		const rows = await fetchIssueFactRows(
+			gql,
+			{ owner: 'o', repo: 'r' },
+			[{ s: '2026-07-02', e: '2026-07-05' }],
+			{ updatedSince: '2026-07-02', createdFrom: '2025-07-01' },
+		);
+		expect(queries).toContain('repo:o/r type:issue created:>=2025-07-01 updated:>=2026-07-02');
+		expect(rows).toEqual([
+			{
+				owner: 'o',
+				repo: 'r',
+				number: 7,
+				createdAt: new Date('2025-08-01T00:00:00Z'),
+				closedAt: null,
+				labels: ['bug'],
+				issueType: null,
+			},
+		]);
 	});
 });
 

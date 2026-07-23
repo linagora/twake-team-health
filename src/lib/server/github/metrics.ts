@@ -456,17 +456,27 @@ export async function fetchPrFactRows(
 	return [...byNumber.values()];
 }
 
-/** Issue facts touched (created or closed) in the given ranges of one repo. */
+/** Issue facts touched (created or closed) in the given ranges of one repo.
+ * `reconcile` adds an `updated:`-keyed pass: an issue created earlier but
+ * relabeled/retyped after first ingest is missed by the created/closed windows,
+ * so re-pull anything UPDATED since `updatedSince` (bounded to the reporting span
+ * by `createdFrom`), reconciling stored labels/type for older in-window issues. */
 export async function fetchIssueFactRows(
 	gql: GraphQL,
 	{ owner, repo }: Repo,
 	ranges: DayRange[],
+	reconcile?: { updatedSince: string; createdFrom: string },
 ): Promise<IssueFact[]> {
 	const byNumber = new Map<number, IssueFact>();
 	const queries = ranges.flatMap(({ s, e }) => [
 		`repo:${owner}/${repo} type:issue created:${s}..${e}`,
 		`repo:${owner}/${repo} type:issue is:closed closed:${s}..${e}`,
 	]);
+	if (reconcile) {
+		queries.push(
+			`repo:${owner}/${repo} type:issue created:>=${reconcile.createdFrom} updated:>=${reconcile.updatedSince}`,
+		);
+	}
 	const pages = await Promise.all(queries.map((q) => searchAllNodes(gql, q, ISSUE_FACT_FIELDS)));
 	{
 		for (const issue of pages.flat()) {
