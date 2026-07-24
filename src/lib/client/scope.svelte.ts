@@ -8,6 +8,7 @@ import {
 	loadScope,
 	saveScope,
 	newTeamId,
+	memberWindow,
 	DEFAULT_TEAM_ID,
 	type Team
 } from './selection';
@@ -27,7 +28,11 @@ class ScopeStore {
 	teams = $state<Team[]>([]);
 	activeTeamId = $state<string>(DEFAULT_TEAM_ID);
 	months = $state(12);
+	/** Derived from `months` (see memberWindow), never set directly: the top bar's
+	 * period drives the member series the same way it drives every other surface. */
 	memberMonths = $state(3);
+	/** Configured shortest member window (DEFAULT_MEMBER_MONTHS), used as the floor. */
+	memberMonthsFloor = $state(3);
 	// End month of the window, "YYYY-MM". Empty = the current month (rolling).
 	to = $state('');
 	initialized = $state(false);
@@ -86,7 +91,7 @@ class ScopeStore {
 					: fallbackId;
 		// Clamp to the server's max so the displayed range can't exceed the data.
 		this.months = Math.min(Math.max(1, validUrlMonths ? urlMonths : s.months), RANGE_MAX);
-		this.memberMonths = Math.min(s.memberMonths, this.months);
+		this.memberMonths = memberWindow(this.months, this.memberMonthsFloor);
 		// End month: URL > localStorage > rolling (current month).
 		this.to = isMonthKey(urlTo) ? urlTo : isMonthKey(s.to) ? s.to : '';
 		this.#persistPrefs();
@@ -140,7 +145,7 @@ class ScopeStore {
 		const latest = window[window.length - 1];
 		this.months = window.length;
 		this.to = latest === monthKeyOf() ? '' : latest;
-		this.memberMonths = Math.min(this.memberMonths, this.months);
+		this.memberMonths = memberWindow(this.months, this.memberMonthsFloor);
 		this.#persistPrefs();
 		this.syncUrl();
 		this.reload();

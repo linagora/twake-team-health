@@ -33,6 +33,16 @@
 	const weekendPct = $derived(pct(pattern?.weekendCommits ?? 0));
 	const lateNightPct = $derived(pct(pattern?.lateNightCommits ?? 0));
 
+	// The member window tracks the top bar's period up to a cap. When the period is
+	// longer, say so rather than letting "last 12 months" pass for the 24 asked for.
+	// Gated on `initialized`: before the scope store loads, months and memberMonths
+	// still hold unrelated defaults, and SSR would render a "capped" the user never
+	// asked for and that hydration then silently corrects.
+	const capped = $derived(scope.initialized && scope.memberMonths < scope.months);
+	const windowLabel = $derived(
+		`last ${scope.memberMonths} months + this month${capped ? ` (capped from ${scope.months})` : ''}`
+	);
+
 	// Per-person health rollup: grade this member against the same admin-tunable
 	// thresholds the team Signals page uses, so the profile shows their individual
 	// standing on burnout (timing) and workload (volume).
@@ -81,7 +91,7 @@
 
 <svelte:head><title>{name} · team·health</title></svelte:head>
 
-<Topbar eyebrow="Profile" title={name} subtitle="{login} · {team?.name ?? 'team'} · last {scope.memberMonths} months + this month">
+<Topbar eyebrow="Profile" title={name} subtitle="{login} · {team?.name ?? 'team'} · {windowLabel}">
 	{#snippet actions()}
 		<a href="/" class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-ink-300)] bg-[var(--color-card)] px-3 py-1.5 text-xs text-[var(--color-ink-800)] hover:border-[var(--color-ink-400)]">
 			<ArrowLeft class="h-3.5 w-3.5" /> Overview

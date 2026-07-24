@@ -27,6 +27,19 @@ const SCOPE_KEY = 'team-health:scope';
 
 export const DEFAULT_TEAM_ID = 'builtin:default';
 
+// Member series (commits, reviews) are the heaviest facts to fetch, so the window
+// driving them follows the selected period only up to this ceiling.
+export const MEMBER_MONTHS_CAP = 12;
+
+/** The member window for a selected period. Follows the period so the profile and
+ * member charts answer the question the top bar asks, capped so a 24-month pick
+ * can't quietly widen the heaviest fetches, and never below the configured floor
+ * (a deployment that set a floor above the cap keeps it). Never exceeds the period
+ * itself, so a rendered "last N months" can't claim more than the data covers. */
+export function memberWindow(months: number, floor: number, cap = MEMBER_MONTHS_CAP): number {
+	return Math.max(Math.min(months, cap), Math.min(floor, months));
+}
+
 export function repoKey(r: Repo): string {
 	return `${r.owner}/${r.repo}`;
 }

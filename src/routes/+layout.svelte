@@ -103,7 +103,8 @@
 		if (bare) return; // sign-in page loads no team data
 		if (!scope.initialized) {
 			scope.months = data.defaults.months;
-			scope.memberMonths = data.defaults.memberMonths;
+			// The member window follows the period; the configured value is its floor.
+			scope.memberMonthsFloor = data.defaults.memberMonths;
 			scope.init(data.defaultTeams, data.teamsPersisted, page.url);
 		}
 	});
