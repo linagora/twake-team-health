@@ -406,3 +406,17 @@ describe('scopeKey', () => {
 		expect(scopeKey([{ owner: 'o', repo: 'a' }])).toMatch(/^[0-9a-f]{8}$/);
 	});
 });
+
+describe('sparkline partial-month flag', () => {
+	it('marks the trend when the series ends on the in-progress month', () => {
+		// now=2026-04 and the 4th bucket is 2026-04, so the tail is partial.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'first-review')?.trend?.partialLast).toBe(true);
+	});
+
+	it('leaves it unset for a window of complete months', () => {
+		// now=2026-06, so 2026-01..04 are all complete and the tail is settled.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-06');
+		expect(find(sig, 'first-review')?.trend?.partialLast).toBe(false);
+	});
+});

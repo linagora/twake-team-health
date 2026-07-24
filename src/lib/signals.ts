@@ -10,7 +10,13 @@ export type SignalLevel = 'ok' | 'warn' | 'bad';
  * plus whether the latest month is better/worse/flat against the prior baseline.
  * Only attached to signals backed by a per-month metric (the flow checks); the
  * live/aggregate signals (attention, bus-factor, burnout, workload) have none. */
-export type SignalTrend = { points: number[]; dir: 'better' | 'worse' | 'flat' };
+export type SignalTrend = {
+	points: number[];
+	dir: 'better' | 'worse' | 'flat';
+	/** True when the final point is the in-progress month, so the sparkline can
+	 * mark a tail that covers days rather than a whole month. */
+	partialLast?: boolean;
+};
 
 export type Signal = {
 	id: string;
@@ -174,15 +180,16 @@ function trendOf(
 	points: number[],
 	betterWhenLower: boolean,
 	judged: number[] = points,
+	partialLast = false,
 ): SignalTrend | undefined {
 	if (points.length < 2) return undefined;
-	if (judged.length < 2) return { points, dir: 'flat' };
+	if (judged.length < 2) return { points, dir: 'flat', partialLast };
 	const last = judged[judged.length - 1];
 	const prior = median(judged.slice(0, -1));
 	const change = last - prior;
 	const rel = prior !== 0 ? Math.abs(change) / prior : last !== 0 ? 1 : 0;
 	const dir = rel < 0.1 ? 'flat' : (betterWhenLower ? change < 0 : change > 0) ? 'better' : 'worse';
-	return { points, dir };
+	return { points, dir, partialLast };
 }
 
 /** Compute the full set of signals (including passing ones), most severe first. */
@@ -216,10 +223,13 @@ export function computeSignals(
 		// median would lower the "typical month" bar and mask a real drop, and as
 		// the latest point it would flip the trend arrow on the 1st of the month.
 		const complete = completeMonths(allMonths, nowMonthKey);
+		// Whether the series ends on the in-progress month, so the sparkline can mark
+		// a tail that covers a few days rather than a whole one.
+		const partialLast = allMonths[allMonths.length - 1]?.month === nowMonthKey;
 		const trend = (
 			pick: (m: (typeof allMonths)[number]) => number,
 			betterWhenLower: boolean,
-		) => trendOf(allMonths.map(pick), betterWhenLower, complete.map(pick));
+		) => trendOf(allMonths.map(pick), betterWhenLower, complete.map(pick), partialLast);
 		out.push({
 			id: 'first-review',
 			level: highIsBad(o.firstReviewHours, t.firstReviewWarnH, t.firstReviewBadH),
