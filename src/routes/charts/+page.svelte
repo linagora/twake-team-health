@@ -13,6 +13,7 @@
 		reviewActivityChart,
 		ticketsChart,
 		commitsByRepoChart,
+		botMonthly,
 		orgTrend,
 		hasOrgActivity,
 		hasRepoActivity
@@ -141,22 +142,15 @@
 	// yet, so a still-empty bucket is dropped rather than drawn as 0h / 0%.
 	const flowMonths = $derived(withoutEmptyCurrentMonth(flow.data?.byMonth ?? [], (m) => m.count > 0));
 
-	// Pivot per-bot monthly rows into one row per month with a column per bot.
+	// Pivot per-bot monthly rows into one row per month with a column per bot. The
+	// axis follows the flow window (flowMonths), so a month with no bot activity
+	// draws as a zero column instead of vanishing from the timeline.
 	function botPivot(field: 'comments' | 'reviews') {
-		const rows = flow.data?.botByMonth ?? [];
-		const logins = [...new Set(rows.map((r) => r.login))];
-		const byMonth = new Map<string, Record<string, number | string>>();
-		for (const r of rows) {
-			const o = byMonth.get(r.month) ?? { month: r.month };
-			o[r.login] = ((o[r.login] as number) ?? 0) + r[field];
-			byMonth.set(r.month, o);
-		}
-		const data = [...byMonth.values()]
-			.sort((a, b) => (a.month as string).localeCompare(b.month as string))
-			.map((o) => {
-				for (const l of logins) if (!(l in o)) o[l] = 0;
-				return o;
-			});
+		const { data, logins } = botMonthly(
+			flow.data?.botByMonth ?? [],
+			flowMonths.map((m) => m.month),
+			field
+		);
 		return { data, series: keySeries(logins) };
 	}
 	const botComments = $derived(activeCategory === 'bot_comments' ? botPivot('comments') : { data: [], series: [] });

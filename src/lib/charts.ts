@@ -1,7 +1,7 @@
 // Pure, client-safe transforms turning parsed metrics into chart-ready series.
 // No filesystem or server access here so it can be unit-tested and run in the browser.
 import type { AppConfig } from './server/config';
-import type { MetricsResult, RepoMonth } from './server/github/types';
+import type { MetricsResult, RepoMonth, BotMonthActivity } from './server/github/types';
 import { repoKey } from './client/selection';
 import { monthKeyOf } from './months';
 
@@ -178,6 +178,36 @@ export type TicketDatum = { month: string; tickets: number; bugs: number };
 /** Team-wide tickets vs bugs created per month (ascending). */
 export function ticketsChart(data: MetricsResult): TicketDatum[] {
 	return data.issuesByMonth.map((m) => ({ month: m.month, tickets: m.tickets, bugs: m.bugs }));
+}
+
+export type BotDatum = { month: string } & Record<string, number | string>;
+
+/** Pivot per-bot monthly rows into one row per month, one column per bot.
+ * The month axis comes from `months` (the flow window), NOT from the rows: a month
+ * in which no bot commented produces no row at all, so deriving the axis from the
+ * rows drops that month entirely and slides its neighbours together as though they
+ * were adjacent. Same rule the member charts follow, for the same reason. */
+export function botMonthly(
+	rows: BotMonthActivity[],
+	months: string[],
+	field: 'comments' | 'reviews'
+): { data: BotDatum[]; logins: string[] } {
+	const logins = [...new Set(rows.map((r) => r.login))];
+	const byMonth = new Map<string, BotDatum>(months.map((month) => [month, { month } as BotDatum]));
+	for (const r of rows) {
+		const o = byMonth.get(r.month);
+		if (!o) continue; // a row outside the window the axis covers
+		o[r.login] = ((o[r.login] as number) ?? 0) + r[field];
+	}
+	return {
+		data: [...byMonth.values()]
+			.sort((a, b) => a.month.localeCompare(b.month))
+			.map((o) => {
+				for (const l of logins) if (!(l in o)) o[l] = 0;
+				return o;
+			}),
+		logins
+	};
 }
 
 export type CommitsByRepoDatum = { repo: string } & Record<string, number>;
