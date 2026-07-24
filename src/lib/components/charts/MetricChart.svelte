@@ -70,11 +70,20 @@
 		})
 	);
 
-	// The last point is the in-progress current month when the x-axis is months and
-	// the final key matches this month; flag it so its partial bar isn't misread.
-	const partialMonth = $derived(
-		data.length > 0 && isMonthKey(data[data.length - 1]?.[x]) && data[data.length - 1]?.[x] === monthKeyOf()
-	);
+	// The in-progress month when this chart contains it, else null. Flag it so its
+	// short bar isn't misread as a real drop. It reaches a chart in one of two
+	// shapes: as the trailing x value when the axis is months, or as one SERIES
+	// among many when the axis is members/repos/people and the months are the
+	// grouped bars. Both need the note. The clock is read inside the derivation,
+	// not captured at init, so a dashboard left open across a month boundary moves
+	// the note onto the new month when the refreshed data arrives instead of
+	// stranding it on a month that has since completed.
+	const partialMonth = $derived.by(() => {
+		const now = monthKeyOf();
+		const trailingX = data.length > 0 ? data[data.length - 1]?.[x] : undefined;
+		const onAxis = isMonthKey(trailingX) && trailingX === now;
+		return onAxis || series.some((s) => s.key === now) ? now : null;
+	});
 
 	const tickLabel = { class: 'fill-[var(--color-ink-600)] text-[10px]' };
 	const axisProps = $derived({
@@ -173,7 +182,7 @@
 
 	{#if partialMonth}
 		<p class="text-[10px] text-[var(--color-ink-500)]">
-			{fmtMonth(monthKeyOf())} is still in progress
+			{fmtMonth(partialMonth)} is still in progress
 		</p>
 	{/if}
 </div>

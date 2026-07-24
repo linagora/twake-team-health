@@ -5,7 +5,7 @@
 	import { scope } from '$lib/client/scope.svelte';
 	import { flow } from '$lib/client/flow.svelte';
 	import { fmtNum, fmtMonth } from '$lib/utils';
-	import { completeMonths } from '$lib/months';
+	import { withoutEmptyCurrentMonth } from '$lib/months';
 	import { AlertCircle, Loader2 } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 
@@ -22,9 +22,12 @@
 
 	const data = $derived(flow.data);
 	const o = $derived(data?.overall);
-	// Flow includes the in-progress month; charts only plot complete months so the
-	// latest point is never a partial-month stub.
-	const byMonth = $derived(completeMonths(data?.byMonth ?? []));
+	// Flow includes the in-progress month and the charts plot it, so the series
+	// ends at today; MetricChart marks the partial trailing month. These are
+	// medians, though, and computeFlow zero-fills a month with no merge yet, so a
+	// still-empty bucket is dropped: 0h to first review is not a fast month, it is
+	// no month, and it would draw as the best result on the chart.
+	const byMonth = $derived(withoutEmptyCurrentMonth(data?.byMonth ?? [], (m) => m.count > 0));
 
 	// Hours -> friendly duration.
 	const dur = (h: number | undefined | null) => {

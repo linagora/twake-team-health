@@ -13,12 +13,14 @@
 		reviewActivityChart,
 		ticketsChart,
 		commitsByRepoChart,
-		orgTrend
+		orgTrend,
+		hasOrgActivity,
+		hasRepoActivity
 	} from '$lib/charts';
 	import type { AppConfig } from '$lib/server/config';
 	import { Button } from '$lib/components/ui/button';
 	import { fmtMonth } from '$lib/utils';
-	import { completeMonths } from '$lib/months';
+	import { withoutEmptyCurrentMonth } from '$lib/months';
 	import { AlertCircle, Loader2, FileDown } from '@lucide/svelte';
 
 	const stats = $derived(metrics.data);
@@ -94,30 +96,30 @@
 		if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
 	}
 
-	// Charts only plot complete months: the report's data runs through today (the
-	// in-progress month is a real bucket, counted by totals/signals), but a
-	// partial month would draw as a misleading dip at the end of every series.
-	const chartStats = $derived(
-		stats
-			? {
-					...stats,
-					repos: completeMonths(stats.repos),
-					authors: completeMonths(stats.authors),
-					mergedByAuthor: completeMonths(stats.mergedByAuthor),
-					issuesByMonth: completeMonths(stats.issuesByMonth)
-				}
-			: null
-	);
+	// Charts plot every bucket the report returns, including the in-progress month,
+	// so a series ends at today instead of at the last month end. MetricChart marks
+	// it, whether it arrives as the trailing x value or as one of the grouped
+	// series on the member/repo charts.
 
 	// Only one category renders at a time, so compute each transform lazily — eagerly
 	// running all six (the member-heavy ones especially) is what froze navigation in.
 	const EMPTY_MEMBER = { months: [] as string[], data: [], members: [] as string[] };
-	const repos = $derived(chartStats && PER_REPO[activeCategory] ? repoSeries(chartStats.repos) : []);
-	const commits = $derived(chartStats && activeCategory === 'Commits' ? commitsChart(chartStats, config) : EMPTY_MEMBER);
-	const merged = $derived(chartStats && activeCategory === 'MergedPRs' ? mergedPrChart(chartStats, config) : EMPTY_MEMBER);
-	const reviews = $derived(chartStats && activeCategory === 'Reviews' ? reviewActivityChart(chartStats, config) : []);
-	const tickets = $derived(chartStats && activeCategory === 'Tickets' ? ticketsChart(chartStats) : []);
-	const commitsByRepo = $derived(chartStats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(chartStats, config) : { repos: [], data: [], members: [] });
+	// Per-repo panels carry the same zero-filled in-progress bucket as the org
+	// trends, and four of these categories are medians or ratios, so drop it per
+	// repo until that repo has activity.
+	const repos = $derived(
+		stats && PER_REPO[activeCategory]
+			? repoSeries(stats.repos).map((s) => ({
+					...s,
+					points: withoutEmptyCurrentMonth(s.points, hasRepoActivity)
+				}))
+			: []
+	);
+	const commits = $derived(stats && activeCategory === 'Commits' ? commitsChart(stats, config) : EMPTY_MEMBER);
+	const merged = $derived(stats && activeCategory === 'MergedPRs' ? mergedPrChart(stats, config) : EMPTY_MEMBER);
+	const reviews = $derived(stats && activeCategory === 'Reviews' ? reviewActivityChart(stats, config) : []);
+	const tickets = $derived(stats && activeCategory === 'Tickets' ? ticketsChart(stats) : []);
+	const commitsByRepo = $derived(stats && activeCategory === 'CommitsByRepo' ? commitsByRepoChart(stats, config) : { repos: [], data: [], members: [] });
 
 	// Team-wide flow metrics over time, drawn from the flow report (not the metrics
 	// report). Loaded lazily when one of these categories is active.
@@ -133,13 +135,15 @@
 		if (NEEDS_FLOW(activeCategory) && team?.repos.length)
 			flow.ensure(team.repos, scope.months, scope.to || undefined);
 	});
-	// Flow fetches live and includes the in-progress month; drop it so the latest
-	// point is always a complete month (no stub dip at the start of a month).
-	const flowMonths = $derived(completeMonths(flow.data?.byMonth ?? []));
+	// Flow fetches live and includes the in-progress month; plot it too so these
+	// series stay current with the rest of the dashboard. These are medians and
+	// percentages over merged PRs, and computeFlow zero-fills a month with no merge
+	// yet, so a still-empty bucket is dropped rather than drawn as 0h / 0%.
+	const flowMonths = $derived(withoutEmptyCurrentMonth(flow.data?.byMonth ?? [], (m) => m.count > 0));
 
 	// Pivot per-bot monthly rows into one row per month with a column per bot.
 	function botPivot(field: 'comments' | 'reviews') {
-		const rows = completeMonths(flow.data?.botByMonth ?? []);
+		const rows = flow.data?.botByMonth ?? [];
 		const logins = [...new Set(rows.map((r) => r.login))];
 		const byMonth = new Map<string, Record<string, number | string>>();
 		for (const r of rows) {
@@ -178,7 +182,14 @@
 			series: [{ key: 'mergeRate', label: '% merged', color: 'var(--color-chart-1)' }]
 		}
 	};
-	const orgMonths = $derived(chartStats && ORG[activeCategory] ? orgTrend(chartStats.repos) : []);
+	// Org ratios (merge rate, days/PR, lines/PR) divide by counts the report
+	// zero-fills, so an untouched in-progress month reports 0% merged rather than
+	// "nothing closed yet"; drop it until the month has activity.
+	const orgMonths = $derived(
+		stats && ORG[activeCategory]
+			? withoutEmptyCurrentMonth(orgTrend(stats.repos), hasOrgActivity)
+			: []
+	);
 
 	// Map a set of keys to colored series; `label` formats the displayed name.
 	function keySeries(keys: string[], label: (k: string) => string = (k) => k): SeriesCfg[] {

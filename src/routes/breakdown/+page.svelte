@@ -11,8 +11,8 @@
 	import { exportPdf } from '$lib/client/print.svelte';
 	import { repoKey, parseList } from '$lib/client/selection';
 	import { replaceSearchParams } from '$lib/client/url';
-	import { completeMonths } from '$lib/months';
-	import { orgTrend, type OrgMonth } from '$lib/charts';
+	import { orgTrend, hasOrgActivity, type OrgMonth } from '$lib/charts';
+	import { withoutEmptyCurrentMonth } from '$lib/months';
 	import { pluralize } from '$lib/utils';
 	import type { Repo } from '$lib/server/github/types';
 	import { AlertCircle, Loader2, FileDown, Filter } from '@lucide/svelte';
@@ -94,7 +94,12 @@
 	const filtered = $derived(
 		globalMetrics.data ? globalMetrics.data.repos.filter((r) => selectedKeys.has(repoKey(r))) : []
 	);
-	const trend = $derived<OrgMonth[]>(orgTrend(completeMonths(filtered)));
+	// Runs through the in-progress month so the charts reach today, minus a month
+	// the selected repos have not touched yet: the report zero-fills it, and
+	// orgTrend would plot that as 0% merge rate rather than as no data.
+	const trend = $derived<OrgMonth[]>(
+		withoutEmptyCurrentMonth(orgTrend(filtered), hasOrgActivity)
+	);
 	const presentRepos = $derived(new Set(filtered.map(repoKey)).size);
 
 	const scopeLabel = $derived.by(() => {

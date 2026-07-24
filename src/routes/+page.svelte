@@ -39,10 +39,10 @@
 	};
 
 	// The report's buckets run through today; the in-progress month is real data.
-	// `allMonthly` keeps it (bar chart renders it as a distinct month-to-date bar);
-	// `totalMonthly` drops it for the series where a partial point would mislead
-	// (sparklines, hero fallback and its month-over-month trends).
-	const currentMonthKey = monthKeyOf();
+	// `allMonthly` keeps it for the bar chart, which renders it as a distinct
+	// month-to-date bar. `totalMonthly` drops it everywhere a partial month would
+	// be read as a whole one: the hero fallback and its month-over-month trends,
+	// and the sparklines that sit under those numbers.
 	const allMonthly = $derived.by(() => {
 		const byMonth = new Map<string, { created: number; merged: number; bugs: number; issues: number }>();
 		for (const r of stats?.repos ?? []) {
@@ -54,6 +54,14 @@
 			byMonth.set(r.month, m);
 		}
 		return [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+	});
+	// Re-read with each refresh rather than captured once at init: this page is
+	// meant to sit open on a wall display, and a stale key would leave the "MTD"
+	// marker on a month that has since completed while the genuinely partial one
+	// renders as finished.
+	const currentMonthKey = $derived.by(() => {
+		void allMonthly;
+		return monthKeyOf();
 	});
 	const totalMonthly = $derived(allMonthly.filter(([month]) => month < currentMonthKey));
 
@@ -108,6 +116,11 @@
 
 	// Sparklines: rolling daily series over the trailing window (falls back to the
 	// monthly buckets only for a stale-cached result without the daily field).
+	// `recentDaily` and `window30d` are missing together, so the fallback fires in
+	// exactly the case where the number above the line is `totals.last`, labelled
+	// "last month", so the line has to end on that same complete month or the tile
+	// contradicts its own sparkline. MiniAreaChart has no partial-month marker to
+	// explain the difference.
 	const daily = $derived(stats?.recentDaily ?? []);
 	const mergedSpark = $derived(daily.length ? daily.map((d) => d.merged) : totalMonthly.map(([, v]) => v.merged));
 	const createdSpark = $derived(daily.length ? daily.map((d) => d.created) : totalMonthly.map(([, v]) => v.created));

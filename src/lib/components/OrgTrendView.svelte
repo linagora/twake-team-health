@@ -4,7 +4,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { avgOver, type OrgMonth } from '$lib/charts';
 	import { fmtMonth, fmtNum } from '$lib/utils';
-	import { monthKeyOf } from '$lib/months';
+	import { completeMonths } from '$lib/months';
 	import { ArrowUp, ArrowDown, Minus } from '@lucide/svelte';
 
 	// One aggregated monthly trend (org-wide or scoped); the parent decides the scope
@@ -12,7 +12,15 @@
 	let { trend, heading = 'How the org is shipping' }: { trend: OrgMonth[]; heading?: string } =
 		$props();
 
-	const months = $derived(trend.map((t) => t.month));
+	// The before/after AVERAGES exclude the in-progress current month: a month
+	// that is only a few days old would otherwise count as a full data point and
+	// drag the "after" average down into a false decline. (The charts still plot
+	// every month; only the averaged comparison drops the partial one.)
+	const complete = $derived(completeMonths(trend));
+	// The split picker offers complete months only, for the same reason: splitting
+	// at the in-progress month would leave "after" empty and report every metric
+	// as a 100% collapse.
+	const months = $derived(complete.map((t) => t.month));
 
 	// Neutral "compare periods" split — the user picks a month; everything before
 	// it is one period, everything from it on is the other. Snap to the midpoint
@@ -23,11 +31,6 @@
 		if (!splitMonth || !months.includes(splitMonth))
 			splitMonth = months.length ? months[Math.floor(months.length / 2)] : '';
 	});
-	// The before/after AVERAGES exclude the in-progress current month: a month
-	// that is only a few days old would otherwise count as a full data point and
-	// drag the "after" average down into a false decline. (The charts still plot
-	// every month; only the averaged comparison drops the partial one.)
-	const complete = $derived(trend.filter((t) => t.month < monthKeyOf()));
 	const before = $derived(complete.filter((t) => t.month < splitMonth));
 	const after = $derived(complete.filter((t) => t.month >= splitMonth));
 
@@ -124,7 +127,7 @@
 <!-- Trend panels -->
 <section>
 	<div class="mb-5">
-		<div class="eyebrow mb-2">Monthly trends · last {trend.length} months</div>
+		<div class="eyebrow mb-2">Monthly trends · last {complete.length} months</div>
 		<h2 class="font-display text-[1.6rem] leading-none tracking-tight">{heading}</h2>
 	</div>
 	<div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
