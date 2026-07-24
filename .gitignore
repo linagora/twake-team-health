@@ -27,3 +27,9 @@ scratchpad/
 
 # Playwright MCP snapshots (capture live page data)
 .playwright-mcp/
+
+# Per-machine compose overrides (ports, mounts, local env)
+docker-compose.override.yml
+
+# Local working notes, not deliverables
+docs/superpowers/
