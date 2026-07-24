@@ -3,6 +3,7 @@
 import type { AppConfig } from './server/config';
 import type { MetricsResult, RepoMonth } from './server/github/types';
 import { repoKey } from './client/selection';
+import { monthKeyOf } from './months';
 
 export type RepoPoint = {
 	month: string;
@@ -88,10 +89,17 @@ function activeMembers(config: AppConfig): { login: string; name: string }[] {
 	return members;
 }
 
-/** The last `n` distinct months (ascending). `n <= 0` keeps them all. */
+/** The last `n` distinct COMPLETE months (ascending), plus the in-progress month
+ * when the data reaches it. `n` is a configured window ("6 months of commits"),
+ * so the month-to-date bucket rides along as an extra rather than consuming a
+ * slot: counting it would silently drop the oldest real month from the chart the
+ * moment someone commits on the 1st. `n <= 0` keeps them all. */
 function lastMonths(months: Iterable<string>, n: number): string[] {
 	const uniq = [...new Set(months)].sort();
-	return n > 0 ? uniq.slice(-n) : uniq;
+	if (n <= 0) return uniq;
+	const current = monthKeyOf();
+	const complete = uniq.filter((m) => m < current);
+	return [...complete.slice(-n), ...uniq.filter((m) => m >= current)];
 }
 
 type MemberRow = { author: string; month: string; value: number };
@@ -231,6 +239,24 @@ export type OrgMonth = {
 	linesPerPr: number; // add+del, merged-weighted
 	interactionsPerPr: number; // comments+reviews, created-weighted
 };
+
+/** Whether an org month bucket has anything in it. The report zero-fills every
+ * (repo, month) pair, so an in-progress month nobody has touched yet arrives as a
+ * row of zeros and orgTrend's ratios read it as 0% merged / 0 days per PR rather
+ * than as a gap. Pair with `withoutEmptyCurrentMonth` to keep that off the charts
+ * until the month has activity. */
+export function hasOrgActivity(m: OrgMonth): boolean {
+	return m.created > 0 || m.closed > 0 || m.merged > 0 || m.issues > 0 || m.releases > 0;
+}
+
+/** The per-repo counterpart of `hasOrgActivity`, for the same zero-fill reason:
+ * an untouched in-progress month would draw 0 days per PR and a 0% bug
+ * resolution rate for a repo that simply had nothing happen yet. Only flow
+ * counts vote; the open-issue stocks carry forward from the previous snapshot,
+ * so they are non-zero in a quiet month and would keep every bucket alive. */
+export function hasRepoActivity(p: RepoPoint): boolean {
+	return p.created > 0 || p.merged > 0 || p.issues > 0 || p.bugs > 0 || p.releases > 0;
+}
 
 /** Aggregate per-repo-month rows into one org-wide monthly trend (ascending).
  * Counts are exact sums; per-PR figures are weighted averages of repo medians. */

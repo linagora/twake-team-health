@@ -7,6 +7,7 @@ import {
 	monthList,
 	recentMonthKeys,
 	completeMonths,
+	withoutEmptyCurrentMonth,
 } from './months';
 
 describe('month key helpers', () => {
@@ -71,5 +72,43 @@ describe('completeMonths', () => {
 			{ month: '2026-07', merged: 1 },
 		];
 		expect(completeMonths(rows, now)).toEqual([{ month: '2026-06', merged: 5 }]);
+	});
+
+	it('accepts a month key when the caller already resolved "now"', () => {
+		const rows = [{ month: '2026-06' }, { month: '2026-07' }];
+		expect(completeMonths(rows, '2026-07').map((r) => r.month)).toEqual(['2026-06']);
+	});
+});
+
+describe('withoutEmptyCurrentMonth', () => {
+	const now = new Date('2026-07-03T09:00:00Z');
+	const hasData = (r: { count: number }) => r.count > 0;
+
+	it('drops a zero-filled in-progress month', () => {
+		const rows = [
+			{ month: '2026-06', count: 8 },
+			{ month: '2026-07', count: 0 },
+		];
+		expect(withoutEmptyCurrentMonth(rows, hasData, now).map((r) => r.month)).toEqual(['2026-06']);
+	});
+
+	it('keeps the in-progress month once it has any data', () => {
+		const rows = [
+			{ month: '2026-06', count: 8 },
+			{ month: '2026-07', count: 1 },
+		];
+		expect(withoutEmptyCurrentMonth(rows, hasData, now)).toEqual(rows);
+	});
+
+	it('never drops a complete month, even an empty one', () => {
+		const rows = [
+			{ month: '2026-05', count: 3 },
+			{ month: '2026-06', count: 0 },
+		];
+		expect(withoutEmptyCurrentMonth(rows, hasData, now)).toEqual(rows);
+	});
+
+	it('tolerates an empty series', () => {
+		expect(withoutEmptyCurrentMonth([], hasData, now)).toEqual([]);
 	});
 });

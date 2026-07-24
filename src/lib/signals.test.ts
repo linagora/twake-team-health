@@ -38,7 +38,10 @@ const stats = (o: Partial<FlowStats>): FlowStats => ({
 
 const flowWith = (overall: Partial<FlowStats>, monthCounts: number[] = []): FlowResult => ({
 	overall: stats(overall),
-	byMonth: monthCounts.map((count, i) => ({ month: `2026-0${i + 1}`, ...stats({ count }) })),
+	byMonth: monthCounts.map((count, i) => ({
+		month: `2026-${String(i + 1).padStart(2, '0')}`,
+		...stats({ count }),
+	})),
 	reviewerLoad: [],
 	botActivity: [],
 	botByMonth: [],
@@ -323,10 +326,52 @@ describe('computeSignals', () => {
 		expect(sig?.trend?.dir).toBe('better'); // the slowest stage shrinking is good
 	});
 
-	it('omits the trend when there is only one complete month', () => {
+	it('runs sparkline trends through the in-progress month', () => {
+		// now=2026-04, so the 4th bucket is the current partial month. The sparkline
+		// still reaches it: the trend must end at today, not at the last month end.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.trend?.points).toEqual([10, 10, 10, 4]);
+	});
+
+	it('reads the trend direction off complete months, not the partial one', () => {
+		// A month that is a few days old always looks like a collapse on a count and
+		// like a breakthrough on a latency median. Steady months plus a partial one
+		// must stay flat, or every signal flips its arrow on the 1st of the month.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 1]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.trend?.points).toEqual([10, 10, 10, 1]);
+		expect(find(sig, 'throughput-drop')?.trend?.dir).toBe('flat');
+	});
+
+	it('flags a real drop in the last complete month', () => {
+		// The guard above must not silence a genuine decline: 2026-03 is complete.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 2, 1]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.trend?.dir).toBe('worse');
+	});
+
+	it('keeps the throughput baseline and headline on complete months only', () => {
+		// The partial month must not drag the "typical month" median down, or a real
+		// drop would compare against an artificially low baseline and go unflagged.
+		// Counts are chosen so the two medians diverge: complete months are
+		// [10, 2, 2], baseline = median([10, 2]) = 6, headline = the last complete
+		// month. Including the partial bucket would give median([10, 2, 2]) = 2 and
+		// a headline of 1, so either regression fails this test.
+		const sig = computeSignals(null, flowWith({}, [10, 2, 2, 1]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.target).toBe('~6/month');
+		expect(find(sig, 'throughput-drop')?.value).toBe('2 merged');
+	});
+
+	it('drops a still-empty in-progress month from the sparkline', () => {
+		// computeFlow zero-fills a month with no merge yet, and these are medians, so
+		// plotting it would dive the line to 0 while the arrow beside it says flat.
+		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 0]), null, DEFAULT_TARGETS, '2026-04');
+		expect(find(sig, 'throughput-drop')?.trend?.points).toEqual([10, 10, 10]);
+	});
+
+	it('trends a single complete month against the in-progress one', () => {
 		const flow = flowWith({}, [10, 5]); // months 2026-01, 2026-02
 		const sig = find(computeSignals(null, flow, null, DEFAULT_TARGETS, '2026-02'), 'first-review');
-		expect(sig?.trend).toBeUndefined(); // only 2026-01 is complete -> < 2 points
+		expect(sig?.trend?.points).toHaveLength(2); // 2026-01 complete + 2026-02 partial
+		expect(sig?.trend?.dir).toBe('flat'); // one complete month is not a comparison
 	});
 
 	it('orders most severe first', () => {

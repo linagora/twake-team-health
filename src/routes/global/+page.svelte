@@ -7,8 +7,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { globalMetrics } from '$lib/client/metrics.svelte';
 	import { exportPdf } from '$lib/client/print.svelte';
-	import { orgTrend, type OrgMonth } from '$lib/charts';
-	import { completeMonths } from '$lib/months';
+	import { orgTrend, hasOrgActivity, type OrgMonth } from '$lib/charts';
+	import { withoutEmptyCurrentMonth } from '$lib/months';
 	import { AlertCircle, Loader2, FileDown } from '@lucide/svelte';
 
 	let { data } = $props();
@@ -20,10 +20,15 @@
 		}
 	});
 
-	const trend = $derived<OrgMonth[]>(globalMetrics.data ? orgTrend(completeMonths(globalMetrics.data.repos)) : []);
+	// The trend runs through the in-progress month so the charts reach today, minus
+	// a month nobody has touched yet: the report zero-fills it, and orgTrend would
+	// plot that as 0% merge rate rather than as no data.
+	const trend = $derived<OrgMonth[]>(
+		withoutEmptyCurrentMonth(orgTrend(globalMetrics.data?.repos ?? []), hasOrgActivity)
+	);
 
-	// Rolling last-30-days headline for the whole org, so this page reflects
-	// today even though its trend charts plot complete months.
+	// Rolling last-30-days headline for the whole org, alongside trend charts that
+	// run through the in-progress month.
 	const win = $derived(globalMetrics.data?.window30d ?? null);
 	const pct = (cur: number, prev: number) => (prev === 0 ? 0 : ((cur - prev) / prev) * 100);
 </script>

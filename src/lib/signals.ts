@@ -2,7 +2,7 @@
 // wrong right now" signals, judged against targets. Pure and unit-tested; the
 // /signals page just renders the result.
 import type { MetricsResult, FlowResult, AttentionResult } from './server/github/types';
-import { monthKeyOf } from './months';
+import { completeMonths, monthKeyOf, withoutEmptyCurrentMonth } from './months';
 
 export type SignalLevel = 'ok' | 'warn' | 'bad';
 
@@ -162,11 +162,23 @@ const median = (xs: number[]): number => {
 /** Direction of the latest month against the median of the months before it.
  * `betterWhenLower` is true for metrics where smaller is healthier (latency,
  * cycle time). Changes within 10% of the baseline read as flat (noise). Needs at
- * least two months; returns undefined otherwise so no sparkline is shown. */
-function trendOf(points: number[], betterWhenLower: boolean): SignalTrend | undefined {
+ * least two months; returns undefined otherwise so no sparkline is shown.
+ *
+ * `points` is what the sparkline draws and may end on the in-progress month;
+ * `judged` is the complete-month series the direction is read off. They differ
+ * because a few days of data is a real point on a line but a meaningless
+ * comparison: an empty bucket is zero, which reads as instant reviews on a
+ * latency metric and as a collapse on a count. Fewer than two complete months
+ * leaves the sparkline with no verdict rather than a verdict on one month. */
+function trendOf(
+	points: number[],
+	betterWhenLower: boolean,
+	judged: number[] = points,
+): SignalTrend | undefined {
 	if (points.length < 2) return undefined;
-	const last = points[points.length - 1];
-	const prior = median(points.slice(0, -1));
+	if (judged.length < 2) return { points, dir: 'flat' };
+	const last = judged[judged.length - 1];
+	const prior = median(judged.slice(0, -1));
 	const change = last - prior;
 	const rel = prior !== 0 ? Math.abs(change) / prior : last !== 0 ? 1 : 0;
 	const dir = rel < 0.1 ? 'flat' : (betterWhenLower ? change < 0 : change > 0) ? 'better' : 'worse';
@@ -189,15 +201,25 @@ export function computeSignals(
 		const o = flow.recent?.current ?? flow.overall;
 		const reviewerLoad = flow.recent?.reviewerLoad ?? flow.reviewerLoad;
 		const rollingNote = flow.recent ? ' Rolling last 30 days.' : '';
-		// Complete months (oldest first), excluding the partial current one, drive the
-		// per-signal sparklines so an in-progress month never reads as a dip/spike.
-		const completeMonths = [...flow.byMonth]
-			.filter((m) => m.month < nowMonthKey)
-			.sort((a, b) => a.month.localeCompare(b.month));
+		// All buckets (oldest first), including the in-progress month, so a
+		// sparkline ends at today rather than at the last month end. Early in a
+		// month that tail point is partial by nature. A month with no merge yet is
+		// dropped rather than plotted: computeFlow zero-fills it, and these are
+		// medians, so the sparkline would dive to 0 while the arrow beside it
+		// (judged on complete months) correctly says flat.
+		const allMonths = withoutEmptyCurrentMonth(
+			[...flow.byMonth].sort((a, b) => a.month.localeCompare(b.month)),
+			(m) => m.count > 0,
+			nowMonthKey,
+		);
+		// Every comparison keeps complete months only: a partial bucket in the
+		// median would lower the "typical month" bar and mask a real drop, and as
+		// the latest point it would flip the trend arrow on the 1st of the month.
+		const complete = completeMonths(allMonths, nowMonthKey);
 		const trend = (
-			pick: (m: (typeof completeMonths)[number]) => number,
+			pick: (m: (typeof allMonths)[number]) => number,
 			betterWhenLower: boolean,
-		) => trendOf(completeMonths.map(pick), betterWhenLower);
+		) => trendOf(allMonths.map(pick), betterWhenLower, complete.map(pick));
 		out.push({
 			id: 'first-review',
 			level: highIsBad(o.firstReviewHours, t.firstReviewWarnH, t.firstReviewBadH),
@@ -254,10 +276,10 @@ export function computeSignals(
 		// staying current through today (no waiting for the month to close). When
 		// the rolling window isn't available (no metrics, e.g. flow-only callers),
 		// fall back to the last complete month vs the median of the months before it.
-		if (completeMonths.length >= 3) {
+		if (complete.length >= 3) {
 			const rolling = metrics?.window30d?.current.merged;
-			const last = rolling ?? completeMonths[completeMonths.length - 1].count;
-			const baselineMonths = rolling !== undefined ? completeMonths : completeMonths.slice(0, -1);
+			const last = rolling ?? complete[complete.length - 1].count;
+			const baselineMonths = rolling !== undefined ? complete : complete.slice(0, -1);
 			const baseline = median(baselineMonths.map((m) => m.count));
 			const dropPct = baseline > 0 ? Math.round(((baseline - last) / baseline) * 100) : 0;
 			const ranLabel = rolling !== undefined ? 'The last 30 days ran' : 'Last full month was';

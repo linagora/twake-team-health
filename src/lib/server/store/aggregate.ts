@@ -1,7 +1,10 @@
 // Facts → report rows. This is where windows are applied: calendar-month
-// buckets for the trend series (complete months only — the report never buckets
-// the in-progress month) and rolling 30-day windows for the headline/leaderboard
-// numbers. All classification happens here, at read time, on raw facts: the bug
+// buckets for the trend series (whichever months resolveReportShape asks for,
+// which on a rolling selection includes the in-progress one) and rolling 30-day
+// windows for the headline/leaderboard numbers. Rows are zero-filled per (repo,
+// month), so an in-progress month with no activity yet reads as literal zeros
+// rather than as an absent bucket; callers that average or draw ratios have to
+// account for that. All classification happens here, at read time: the bug
 // matcher (config change = retroactive), member attribution (roster change =
 // retroactive), and local-time burnout classification (timezone change =
 // retroactive). The monthly bucket math reuses the same pure per-month stat
@@ -69,8 +72,8 @@ const commitAuthor = (c: CommitFact) =>
 	}) as const;
 
 /** Fold facts into the same StoredRows shape the legacy monthly store produced,
- * bucketed by the given complete months. Repo rows are zero-filled so charts
- * never show a gap for a quiet month. */
+ * bucketed by the given months. Repo rows are zero-filled so charts never show a
+ * gap for a quiet month. */
 export function buildStoredRows(bundle: FactBundle, opts: AggregateOptions): StoredRows {
 	const { repos, members, months, memberMonths, isBug } = opts;
 	const monthWindows = months.map((m) => ({

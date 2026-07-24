@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
 	repoSeries,
 	commitsChart,
@@ -114,6 +114,29 @@ describe('memberMonthly charts', () => {
 		const m = mergedPrChart(DATA, CONFIG);
 		const octocat = m.data.find((d) => d.member === 'octocat')!;
 		expect(octocat['2026-03']).toBe(7);
+	});
+
+	it('lets the in-progress month ride along instead of consuming a window slot', () => {
+		// commit_months counts COMPLETE months. With the clock inside 2026-03 the
+		// window is the last 2 complete months (2026-01, 2026-02) PLUS the partial
+		// 2026-03, not [2026-02, 2026-03] with a month of history silently dropped.
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date('2026-03-02T00:00:00Z'));
+			expect(commitsChart(DATA, CONFIG).months).toEqual(['2026-01', '2026-02', '2026-03']);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('keeps exactly commit_months months once they are all complete', () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date('2026-04-02T00:00:00Z'));
+			expect(commitsChart(DATA, CONFIG).months).toEqual(['2026-02', '2026-03']);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

@@ -51,13 +51,32 @@ export function recentMonthKeys(n: number, now: Date = new Date()): string[] {
 	return monthList(addMonths(end, -(n - 1)), end);
 }
 
-/** Drop the in-progress calendar month from a month-keyed series so charts only
- * plot complete months (no stub bar in the first days of a month). A historical
- * window already ends before the current month, so this is a no-op there. */
+/** Drop the in-progress calendar month from a month-keyed series. Charts plot
+ * that bucket (it is real data through today), but anything that compares months
+ * to each other must not: a few days of data would enter a median, an average or
+ * a month-over-month delta as if it were a whole month. A historical window
+ * already ends before the current month, so this is a no-op there. */
 export function completeMonths<T extends { month: string }>(
 	rows: T[],
-	now: Date = new Date(),
+	now: Date | string = new Date(),
 ): T[] {
-	const current = monthKeyOf(now);
+	const current = typeof now === 'string' ? now : monthKeyOf(now);
 	return rows.filter((r) => r.month < current);
+}
+
+/** Drop a trailing in-progress month that carries no data yet. The report and the
+ * flow aggregator zero-fill every bucket in the window, so an untouched current
+ * month arrives as literal zeros rather than as an absent point, and zero is a
+ * plausible value: 0h to first review draws as a breakthrough, 0% merge rate as a
+ * collapse. Once the month has any data its partial values are meaningful and it
+ * stays. `hasData` says what counts as data for that series. */
+export function withoutEmptyCurrentMonth<T extends { month: string }>(
+	rows: T[],
+	hasData: (row: T) => boolean,
+	now: Date | string = new Date(),
+): T[] {
+	const current = typeof now === 'string' ? now : monthKeyOf(now);
+	const last = rows[rows.length - 1];
+	if (last && last.month === current && !hasData(last)) return rows.slice(0, -1);
+	return rows;
 }

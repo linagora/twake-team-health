@@ -1,9 +1,11 @@
 // Report orchestrator over the fact store. Facts are synced per repo (watermark
 // model, see sync.ts), read once, and aggregated at read time into:
 //   - calendar-month buckets covering the full requested window THROUGH TODAY
-//     (the in-progress month is an extra bucket; charts drop it at render time
-//     via completeMonths so they never show a stub bar, while sums, signals and
-//     leaderboards keep it so nothing is cut off at a month boundary),
+//     (the in-progress month is an extra bucket, rendered by charts as a partial
+//     trailing point and counted by sums, signals and leaderboards, so nothing is
+//     cut off at a month boundary; anything that COMPARES months to each other,
+//     a median, an average or a month-over-month delta, drops it first via
+//     completeMonths),
 //   - rolling trailing-30d headline + per-member numbers (window30d /
 //     recentMembers), which always span a full 30 days.
 // With no DATABASE_URL it falls back to fetching facts live on every request.
@@ -23,7 +25,7 @@ import type { Selection, MetricsResult, FactBundle } from './github/types';
 
 export type ReportShape = {
 	/** Repo-series buckets, ascending: N complete months + the in-progress month
-	 * on rolling selections (charts drop the partial bucket client-side). */
+	 * on rolling selections (charts plot the partial bucket as the trailing point). */
 	months: Month[];
 	/** Member/review-series buckets, ascending (same rule). */
 	memberMonths: Month[];
@@ -36,18 +38,18 @@ export type ReportShape = {
 };
 
 /**
- * Pure: resolve a selection into complete-month buckets and fact-span bounds.
- * The window always ends at the last COMPLETE month (or the explicit `to`), so
- * no bucket is ever the in-progress month; the rolling windows end at today
- * (rolling selection) or at the historical month's end.
+ * Pure: resolve a selection into month buckets and fact-span bounds.
+ * A rolling selection ends at the in-progress month so every surface reaches
+ * today; an explicit historical `to` ends there instead (all months complete).
+ * The rolling windows end at today, or at the historical month's end.
  */
 export function resolveReportShape(selection: Selection, now: Date): ReportShape {
 	const current = monthKeyOf(now);
 	const historical = selection.to !== undefined && selection.to < current;
 	// Rolling selections bucket the requested N COMPLETE months PLUS the
-	// in-progress month as an extra bucket: sums, signals, and leaderboards see
-	// data through today, while charts drop the partial bucket at render time
-	// (completeMonths), so no surface is cut off and no chart shows a stub bar.
+	// in-progress month as an extra bucket, so every surface (charts, sums,
+	// signals, leaderboards) runs through today rather than stopping at the
+	// last month end.
 	// An explicit historical `to` is honored as-is (all its months are complete).
 	const endKey = historical ? selection.to! : current;
 	const extra = historical ? 0 : 1;
