@@ -4,11 +4,11 @@
 import { and, eq, gte, lt, sql } from 'drizzle-orm';
 import { db, hasDb } from './db';
 import { signalSnapshot } from './db/schema';
-import type { Signal, SignalLevel } from '$lib/signals';
+import { HISTORY_DAYS, type Signal, type SignalLevel } from '$lib/signals';
 
 // How many days of history to keep / read. The warm job prunes older rows so the
-// table stays bounded; the page reads (and renders) this same window.
-export const HISTORY_DAYS = 30;
+// table stays bounded; the page lays them over this same window.
+export { HISTORY_DAYS } from '$lib/signals';
 
 export type SignalHistoryPoint = { day: string; level: SignalLevel; value: string };
 /** Per-signal recent history, newest scopes grouped: { [signalId]: points[] } (oldest day first). */

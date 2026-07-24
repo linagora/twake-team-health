@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeSignals, DEFAULT_TARGETS, scopeKey } from './signals';
+import { computeSignals, historyAxis, DEFAULT_TARGETS, scopeKey } from './signals';
 import type {
 	FlowResult,
 	AttentionResult,
@@ -418,5 +418,27 @@ describe('sparkline partial-month flag', () => {
 		// now=2026-06, so 2026-01..04 are all complete and the tail is settled.
 		const sig = computeSignals(null, flowWith({}, [10, 10, 10, 4]), null, DEFAULT_TARGETS, '2026-06');
 		expect(find(sig, 'first-review')?.trend?.partialLast).toBe(false);
+	});
+});
+
+describe('historyAxis', () => {
+	const now = new Date('2026-07-24T10:00:00Z');
+	const pt = (day: string) => ({ day, level: 'ok' as const, value: '1' });
+
+	it('lays snapshots over a fixed window, oldest first', () => {
+		const cells = historyAxis([pt('2026-07-23'), pt('2026-07-24')], 3, now);
+		expect(cells.map((c) => c.day)).toEqual(['2026-07-22', '2026-07-23', '2026-07-24']);
+	});
+
+	it('leaves a hole for a day with no snapshot', () => {
+		// The strip stopped two days ago: the axis must still reach today, with the
+		// missing days empty, or a stale strip looks identical to a current one.
+		const cells = historyAxis([pt('2026-07-21'), pt('2026-07-22')], 4, now);
+		expect(cells.map((c) => !!c.point)).toEqual([true, true, false, false]);
+	});
+
+	it('ignores snapshots older than the window', () => {
+		const cells = historyAxis([pt('2026-01-01'), pt('2026-07-24')], 2, now);
+		expect(cells.filter((c) => c.point)).toHaveLength(1);
 	});
 });
