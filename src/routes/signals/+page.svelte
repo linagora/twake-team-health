@@ -5,7 +5,13 @@
 	import { flow } from '$lib/client/flow.svelte';
 	import { attention } from '$lib/client/attention.svelte';
 	import { scope } from '$lib/client/scope.svelte';
-	import { computeSignals, DEFAULT_TARGETS, type SignalLevel } from '$lib/signals';
+	import {
+		computeSignals,
+		historyAxis,
+		HISTORY_DAYS,
+		DEFAULT_TARGETS,
+		type SignalLevel
+	} from '$lib/signals';
 	import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, Loader2, TrendingUp, TrendingDown, Minus } from '@lucide/svelte';
 	import Avatar from '$lib/components/Avatar.svelte';
 	import MiniAreaChart from '$lib/components/charts/MiniAreaChart.svelte';
@@ -52,6 +58,8 @@
 	// Daily level history for the metrics-derived signals (burnout, workload, ...),
 	// keyed by signal id. Best-effort enhancement: a fetch failure just hides strips.
 	type HistoryPoint = { day: string; level: SignalLevel; value: string };
+	// Today's UTC day key, so the strip can say when its newest snapshot predates it.
+	const today = new Date().toISOString().slice(0, 10);
 	let history = $state<Record<string, HistoryPoint[]>>({});
 	let historyReq = 0; // ignore out-of-order responses when the team switches mid-flight
 	$effect(() => {
@@ -149,16 +157,25 @@
 									</a>
 								{/if}
 								{#if history[s.id]?.length > 1}
+									{@const cells = historyAxis(history[s.id])}
+									{@const last = history[s.id].at(-1)?.day}
 									<div class="mt-3">
-										<div class="mb-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-ink-500)]">
-											Recent days
+										<div class="mb-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-ink-500)]">
+											<span>Last {HISTORY_DAYS} days</span>
+											{#if last && last !== today}
+												<span class="normal-case tracking-normal text-[var(--color-ink-400)]">
+													newest snapshot {last}
+												</span>
+											{/if}
 										</div>
-										<div class="flex gap-0.5" title="daily level over recent snapshots">
-											{#each history[s.id] as p (p.day)}
+										<div class="flex gap-0.5" title="daily level, one slot per day (empty = no snapshot)">
+											{#each cells as c (c.day)}
 												<span
 													class="h-3 w-2 rounded-[2px]"
-													style="background: {accent[p.level]}"
-													title="{p.day}: {p.value} ({p.level})"
+													style={c.point
+														? `background: ${accent[c.point.level]}`
+														: 'background: transparent; box-shadow: inset 0 0 0 1px var(--color-ink-200)'}
+													title={c.point ? `${c.day}: ${c.point.value} (${c.point.level})` : `${c.day}: no snapshot`}
 												></span>
 											{/each}
 										</div>

@@ -131,6 +131,35 @@ export function scopeKey(repos: { owner: string; repo: string }[]): string {
 	return (h >>> 0).toString(16).padStart(8, '0');
 }
 
+/** Days of daily signal history kept, read, and rendered. Lives here rather than
+ * in the server module so the page can lay snapshots over the same fixed window
+ * the writer prunes to, without the two drifting apart. */
+export const HISTORY_DAYS = 30;
+
+export type HistoryPoint = { day: string; level: SignalLevel; value: string };
+/** One slot on the recent-days axis. `point` is absent when no snapshot exists. */
+export type HistoryCell = { day: string; point?: HistoryPoint };
+
+/** Lay a signal's snapshots over a fixed recent-days axis, oldest first.
+ * Rendering the rows as they come makes a missing day close up rather than leave
+ * a hole, so a strip that stopped updating days ago is indistinguishable from a
+ * current one. Anchoring to the axis keeps a gap looking like a gap. */
+export function historyAxis(
+	points: HistoryPoint[],
+	days: number = HISTORY_DAYS,
+	now: Date = new Date(),
+): HistoryCell[] {
+	const byDay = new Map(points.map((p) => [p.day, p]));
+	const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+	const out: HistoryCell[] = [];
+	for (let i = days - 1; i >= 0; i--) {
+		const day = new Date(end - i * 86_400_000).toISOString().slice(0, 10);
+		const point = byDay.get(day);
+		out.push(point ? { day, point } : { day });
+	}
+	return out;
+}
+
 const SEVERITY: Record<SignalLevel, number> = { bad: 0, warn: 1, ok: 2 };
 
 /** Worse as the value climbs (e.g. review latency). */
