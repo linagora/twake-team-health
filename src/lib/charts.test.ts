@@ -6,7 +6,7 @@ import {
 	reviewActivityChart,
 	ticketsChart
 } from './charts';
-import { commitsByRepoChart, orgTrend, avgOver } from './charts';
+import { commitsByRepoChart, orgTrend, avgOver, botMonthly } from './charts';
 import type { AppConfig } from './server/config';
 import type { MetricsResult, RepoMonth } from './server/github/types';
 
@@ -193,5 +193,38 @@ describe('orgTrend', () => {
 
 	it('avgOver averages a field across months', () => {
 		expect(avgOver(trend, 'merged')).toBe(2); // (2 + 2)/2
+	});
+});
+
+describe('botMonthly', () => {
+	const rows = [
+		{ month: '2026-01', login: 'dependabot[bot]', comments: 4, reviews: 1 },
+		{ month: '2026-03', login: 'dependabot[bot]', comments: 2, reviews: 3 }
+	];
+
+	it('keeps a month with no bot activity as a zero column', () => {
+		// February has no row at all: deriving the axis from the rows would drop it
+		// and slide January against March as though they were adjacent months.
+		const { data } = botMonthly(rows, ['2026-01', '2026-02', '2026-03'], 'comments');
+		expect(data.map((d) => d.month)).toEqual(['2026-01', '2026-02', '2026-03']);
+		expect(data[1]['dependabot[bot]']).toBe(0);
+	});
+
+	it('pivots the requested field', () => {
+		const { data, logins } = botMonthly(rows, ['2026-01', '2026-03'], 'reviews');
+		expect(logins).toEqual(['dependabot[bot]']);
+		expect(data.map((d) => d['dependabot[bot]'])).toEqual([1, 3]);
+	});
+
+	it('ignores rows outside the window the axis covers', () => {
+		const { data } = botMonthly(rows, ['2026-03'], 'comments');
+		expect(data).toHaveLength(1);
+		expect(data[0]['dependabot[bot]']).toBe(2);
+	});
+
+	it('zero-fills every bot across every month', () => {
+		const two = [...rows, { month: '2026-01', login: 'renovate[bot]', comments: 7, reviews: 0 }];
+		const { data } = botMonthly(two, ['2026-01', '2026-03'], 'comments');
+		expect(data[1]['renovate[bot]']).toBe(0);
 	});
 });
