@@ -175,7 +175,13 @@
 									<div class="mt-2 flex items-center justify-end gap-1.5" title="vs recent months">
 										<!-- Neutral stroke: the line shows the raw metric shape; the arrow alone
 										     carries the better/worse verdict (a falling latency is good but slopes down). -->
-										<MiniAreaChart values={s.trend.points} width={60} height={18} stroke="var(--color-ink-400)" />
+										<MiniAreaChart
+											values={s.trend.points}
+											partialLast={s.trend.partialLast}
+											width={60}
+											height={18}
+											stroke="var(--color-ink-400)"
+										/>
 										<Icon class="h-3.5 w-3.5 shrink-0" style="color: {trendColor(s.trend.dir)}" />
 									</div>
 								{/if}

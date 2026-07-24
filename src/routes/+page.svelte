@@ -119,8 +119,8 @@
 	// `recentDaily` and `window30d` are missing together, so the fallback fires in
 	// exactly the case where the number above the line is `totals.last`, labelled
 	// "last month", so the line has to end on that same complete month or the tile
-	// contradicts its own sparkline. MiniAreaChart has no partial-month marker to
-	// explain the difference.
+	// contradicts its own sparkline. Marking a partial tail would not reconcile the
+	// two: the headline figure itself is last month's.
 	const daily = $derived(stats?.recentDaily ?? []);
 	const mergedSpark = $derived(daily.length ? daily.map((d) => d.merged) : totalMonthly.map(([, v]) => v.merged));
 	const createdSpark = $derived(daily.length ? daily.map((d) => d.created) : totalMonthly.map(([, v]) => v.created));
