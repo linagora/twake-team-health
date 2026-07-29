@@ -172,7 +172,11 @@
 							</div>
 							{#if item.value !== undefined}
 								<span class="text-foreground font-mono font-medium tabular-nums">
-									{item.value.toLocaleString()}
+									<!-- A null point is a real gap in the series (a month with
+									     nothing to measure), not a zero. Series that gap on
+									     purpose still get hovered, so render the dash instead
+									     of calling toLocaleString on null. -->
+									{item.value === null ? "—" : item.value.toLocaleString()}
 								</span>
 							{/if}
 						</div>
