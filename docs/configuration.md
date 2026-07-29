@@ -82,6 +82,7 @@ All optional; defaults are tuned for a mid-size org. See
 | `METRICS_CACHE_TTL_MS` | `1200000` (20m) | Assembled team/global report cache TTL. |
 | `FLOW_CACHE_TTL_MS` | `1800000` (30m) | Cycle-time and review-health report cache TTL. |
 | `ATTENTION_CACHE_TTL_MS` | `600000` (10m) | Open-PR worklist cache TTL. |
+| `PERSON_CACHE_TTL_MS` | `1200000` (20m) | Per-member profile report cache TTL. |
 | `DISCOVERY_CACHE_TTL_MS` | `21600000` (6h) | Org repo and member discovery cache TTL. |
 | `CACHE_LOCK_TTL_MS` | `600000` (10m) | Distributed lock timeout that powers cross-replica single-flight. |
 

@@ -18,7 +18,7 @@ that is mirrored into the URL.
 | `/breakdown` | Org trends filtered to a team or repo subset. |
 | `/teams` | Create and edit private teams. |
 | `/bots` | Bot review activity on merged PRs. |
-| `/people/[login]` | One contributor's commits, PRs, reviews, repos and lines. |
+| `/people/[login]` | One contributor: commits, PRs, repos and lines, plus their delivery, review-given, review-received and collaboration record with monthly trends. |
 | `/settings` | Admin configuration (admins only). |
 | `/logs` | Audit trail (admins only). |
 
@@ -35,6 +35,9 @@ The concrete stores extend it, one per API endpoint:
 - `metrics` and `globalMetrics` POST a selection to `/api/metrics`.
 - `attention` POSTs the team's repos to `/api/attention`.
 - `flow` POSTs repos plus the month window to `/api/flow`.
+- `person` POSTs the same selection as `metrics` plus a member login to
+  `/api/person`. Only the profile page loads it, so it is driven by an effect on
+  that page rather than by the scope store.
 - `discovery` fetches the org repo and member lists once.
 
 A page reads `store.data` (with a server-rendered initial value as fallback),
