@@ -169,8 +169,13 @@
 				onMenu={() => (drawerOpen = true)}
 			/>
 			<LoadingBar active={loading} />
-			<!-- Dim + soften the stale view while a new report loads, so it's clearly refreshing. -->
-			<div class="transition-opacity duration-200 {loading ? 'pointer-events-none opacity-45' : ''}" aria-busy={loading}>
+			<!-- Dim + soften the stale view while a new report loads, so it's clearly
+			     refreshing. Visual only: blocking pointer events here swallowed every
+			     link inside the page, so navigation only half worked (the sidebar sits
+			     outside this wrapper and kept responding). A profile blocks on both the
+			     team report and the person report, so it stayed dead the longest.
+			     Leaving a view while it loads is always legitimate. -->
+			<div class="transition-opacity duration-200 {loading ? 'opacity-45' : ''}" aria-busy={loading}>
 				{@render children()}
 			</div>
 		</main>
