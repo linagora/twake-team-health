@@ -121,7 +121,7 @@
 		totals
 			? [
 					{ label: 'PRs opened', value: fmtNum(totals.prsCreated), note: `${fmtNum(totals.prsMerged)} merged, ${fmtNum(totals.prsClosedUnmerged)} dropped` },
-					{ label: 'Merge rate', value: `${totals.mergeRatePct}%`, note: 'of the PRs they closed' },
+					{ label: 'Merge rate', value: totals.mergeRatePct === null ? '—' : `${totals.mergeRatePct}%`, note: totals.mergeRatePct === null ? 'they have closed no PRs yet' : 'of the PRs they closed' },
 					{ label: 'Median PR size', value: orDash(totals.medianPrSize), note: totals.medianPrSize === null ? TOO_FEW : 'lines changed, merged PRs' },
 					{ label: 'Median cycle time', value: dur(totals.medianCycleHours), note: totals.medianCycleHours === null ? TOO_FEW : 'open to merge, their PRs' }
 				]
@@ -165,9 +165,15 @@
 		withoutEmptyCurrentMonth(byMonth, (m) => m.reviewsGiven > 0 || m.commentsGiven > 0 || m.reviewsReceived > 0)
 	);
 	const volume = $derived(withoutEmptyCurrentMonth(byMonth, (m) => m.additions > 0 || m.deletions > 0));
-	// A month with nothing merged has no median; plotting it as 0h would draw the
-	// quietest month as the fastest one, so those months are dropped outright.
-	const timing = $derived(byMonth.filter((m) => m.cycleHours !== null || m.pickupHours !== null));
+	// A month with nothing merged has no median, and plotting it as 0h would draw
+	// the quietest month as the fastest one — so it stays null and the line gaps
+	// there. The month itself keeps its place on the axis: dropping quiet rows is
+	// what made neighbouring months slide together as though they were adjacent
+	// (see the bot chart fix, #112). Only the trailing in-progress month is
+	// dropped, and only while it is still empty.
+	const timing = $derived(
+		withoutEmptyCurrentMonth(byMonth, (m) => m.cycleHours !== null || m.pickupHours !== null)
+	);
 	const hasTrend = $derived(byMonth.some((m) => m.commits || m.prsCreated || m.prsMerged || m.reviewsGiven || m.commentsGiven || m.reviewsReceived));
 </script>
 

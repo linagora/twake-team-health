@@ -71,7 +71,10 @@
 				refresh: forceThenReload(
 					['metrics', 'person'],
 					[() => scope.reload(), () => person.reload()],
-					decodeURIComponent(p.slice('/people/'.length))
+					// The router's already-decoded param, not the raw pathname: this
+					// runs for every route, and decoding a malformed path here would
+					// throw out of the whole layout rather than just this page.
+					page.params.login
 				)
 			};
 		return { loading: metrics.loading, refresh: forceThenReload(['metrics'], [() => scope.reload()]) };

@@ -12,9 +12,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const body = await request.json().catch(() => ({}));
 		selection = parseSelection(body);
 		const raw = (body as { login?: unknown }).login;
-		// The subject must be a member of the submitted (already validated) roster.
-		// That is the sanitization guard and the authorization guard at once: no
-		// arbitrary login can be aimed at the privileged token through this route.
+		// The subject must be a member of the submitted roster, which parseSelection
+		// has already shape-validated. This is a sanitization guard, not an
+		// authorization one: the caller supplies the roster too, so it constrains
+		// the login's FORM, not who may be asked about. Authorization here is the
+		// repo allowlist that parseSelection applies — the report only ever reads
+		// facts from repos in ALLOWED_ORGS, and the login merely filters those.
 		const match = selection.members.find(
 			(m) => typeof raw === 'string' && m.login.toLowerCase() === raw.toLowerCase(),
 		);

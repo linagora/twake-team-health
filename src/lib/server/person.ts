@@ -125,7 +125,13 @@ export function buildPersonStats(
 	let prsClosedUnmerged = 0;
 	const sizes: number[] = [];
 	const cycles: number[] = [];
-	const mergedKeys = new Set<string>();
+	// Their merged PRs that were ALSO opened inside the window. Review facts only
+	// reach back to the window start, so a PR opened before it may have been
+	// reviewed where we cannot see — which would read as "merged with no review"
+	// and as an absurdly long wait. Only PRs whose whole review history is
+	// visible can answer those two questions, so the latency measures use this
+	// set while the plain counts above use every PR merged in the window.
+	const fullyVisibleMerges = new Set<string>();
 	for (const p of bundle.prs) {
 		if (!want.has(rk(p))) continue;
 		prByKey.set(prKey(p, p.number), p);
@@ -137,7 +143,7 @@ export function buildPersonStats(
 		}
 		if (p.mergedAt && inWin(p.mergedAt)) {
 			prsMerged += 1;
-			mergedKeys.add(prKey(p, p.number));
+			if (inWin(p.createdAt)) fullyVisibleMerges.add(prKey(p, p.number));
 			const r = rows.get(monthOf(p.mergedAt));
 			if (r) {
 				r.prsMerged += 1;
@@ -216,11 +222,14 @@ export function buildPersonStats(
 		}
 	}
 
-	// Pickup: how long a PR waited for THIS member's first look at it.
+	// Pickup: how long a PR waited for THIS member's first look at it. Same
+	// visibility rule as the wait below — on a PR opened before the window, the
+	// earliest review we can see may be their second or third, which would read
+	// as a pickup of weeks when they in fact answered within the hour.
 	const pickups: number[] = [];
 	for (const [k, t] of myFirstOnPr) {
 		const pr = prByKey.get(k);
-		if (!pr) continue;
+		if (!pr || !inWin(pr.createdAt)) continue;
 		const h = (t - pr.createdAt.getTime()) / HOUR;
 		if (h < 0) continue;
 		pickups.push(h);
@@ -231,7 +240,7 @@ export function buildPersonStats(
 	// many never got one.
 	const waits: number[] = [];
 	let unreviewedMerges = 0;
-	for (const k of mergedKeys) {
+	for (const k of fullyVisibleMerges) {
 		const first = firstOnMyPr.get(k);
 		const pr = prByKey.get(k);
 		if (first === undefined) {
@@ -251,7 +260,9 @@ export function buildPersonStats(
 		prsCreated,
 		prsMerged,
 		prsClosedUnmerged,
-		mergeRatePct: closedTotal ? round((prsMerged / closedTotal) * 100) : 0,
+		// No closed PRs means no rate exists. Reporting 0% would read as "nothing
+		// they open ever lands", which is the opposite of "nothing has landed yet".
+		mergeRatePct: closedTotal ? round((prsMerged / closedTotal) * 100) : null,
 		medianPrSize: med(sizes, MIN_MEDIAN_SAMPLE),
 		medianCycleHours: med(cycles, MIN_MEDIAN_SAMPLE),
 		reviewsGiven,

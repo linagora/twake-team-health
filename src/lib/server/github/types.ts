@@ -158,8 +158,9 @@ export type PersonTotals = {
 	prsCreated: number;
 	prsMerged: number;
 	prsClosedUnmerged: number;
-	/** merged / (merged + closed unmerged), 0 when they closed nothing. */
-	mergeRatePct: number;
+	/** merged / (merged + closed unmerged), null when they closed nothing at all
+	 * (no rate exists, which is not the same as a rate of 0%). */
+	mergeRatePct: number | null;
 	/** Median additions + deletions of their merged PRs. */
 	medianPrSize: number | null;
 	/** Median hours from open to merge on their own PRs. */
@@ -171,14 +172,18 @@ export type PersonTotals = {
 	prsReviewed: number;
 	approvals: number;
 	changesRequested: number;
-	/** Median hours from a PR opening to their first review on it. */
+	/** Median hours from a PR opening to their first review on it. Counts only
+	 * PRs opened inside the window, whose review history is fully visible. */
 	medianPickupHours: number | null;
 	// Receiving: the review their own work attracted.
 	reviewsReceived: number;
 	reviewersDistinct: number;
-	/** Median hours their PRs waited for a first human review. */
+	/** Median hours their PRs waited for a first human review. Same visibility
+	 * rule as `medianPickupHours`. */
 	medianWaitHours: number | null;
-	/** Their PRs that merged with no human review at all. */
+	/** Their PRs that were opened AND merged inside the window with no human
+	 * review. A PR opened earlier is not counted: it may have been reviewed
+	 * before the window, where the review facts do not reach. */
 	unreviewedMerges: number;
 };
 
