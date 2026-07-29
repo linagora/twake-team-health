@@ -5,14 +5,15 @@ import { ensureFactsSynced } from '$lib/server/sync';
 import { refreshMetrics } from '$lib/server/metrics-cache';
 import { refreshFlow } from '$lib/server/flow-cache';
 import { refreshAttention } from '$lib/server/attention-cache';
+import { refreshPerson } from '$lib/server/person-cache';
 import { getAppSettings } from '$lib/server/app-config';
 import { monthStart } from '$lib/server/github/months';
 import { throwUpstreamError } from '$lib/server/api-errors';
 import { audit } from '$lib/server/store/audit';
 import type { RequestHandler } from './$types';
 
-type Kind = 'metrics' | 'flow' | 'attention';
-const KINDS: Kind[] = ['metrics', 'flow', 'attention'];
+type Kind = 'metrics' | 'flow' | 'attention' | 'person';
+const KINDS: Kind[] = ['metrics', 'flow', 'attention', 'person'];
 
 // Force-refresh what a page actually shows: refetch the fact tail from GitHub
 // now (ignoring the sync TTL), recompute the requested report kinds, and replace
@@ -22,12 +23,22 @@ const KINDS: Kind[] = ['metrics', 'flow', 'attention'];
 export const POST: RequestHandler = async ({ request, locals }) => {
 	let selection;
 	let kinds: Kind[];
+	let login: string | undefined;
 	try {
 		const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 		selection = parseSelection(body);
 		const requested = Array.isArray(body.kinds) ? body.kinds : ['metrics'];
 		kinds = KINDS.filter((k) => requested.includes(k));
 		if (!kinds.length) kinds = ['metrics'];
+		// The person report is per subject, so that kind carries one; as everywhere
+		// else, the subject must be in the submitted roster.
+		const raw = body.login;
+		login = selection.members.find(
+			(m) => typeof raw === 'string' && m.login.toLowerCase() === raw.toLowerCase(),
+		)?.login;
+		if (kinds.includes('person') && !login) {
+			kinds = kinds.filter((k) => k !== 'person');
+		}
 	} catch (e) {
 		throw error(400, (e as Error).message);
 	}
@@ -60,6 +71,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (kinds.includes('attention')) {
 			await refreshAttention(selection.repos);
 			done.push('attention');
+		}
+		if (kinds.includes('person') && login) {
+			await refreshPerson(selection, login);
+			done.push('person');
 		}
 
 		await audit(locals.user.sub, 'metrics.refresh', {

@@ -103,6 +103,7 @@ version (so a shape change invalidates old entries automatically):
 | metrics | assembled team or org report | repos, members (login plus email), months, memberMonths, to | 20 min |
 | flow | cycle time and review health | repos, months, to | 30 min |
 | attention | open-PR worklist | repos | 10 min |
+| person | one member's delivery, review and collaboration record | subject login, repos, members (login plus email), months, memberMonths, to | 20 min |
 | discovery | org repos and members | allowed orgs | 6 hours |
 
 The current-month freshness (`CURRENT_MONTH_TTL_MS`) is separate from these report

@@ -49,8 +49,10 @@ const inWin = (d: Date | null, w: MsWindow): boolean =>
 	d !== null && d.getTime() >= w.startMs && d.getTime() <= w.endMs;
 
 /** Member attribution maps, built once per aggregation (same rules the legacy
- * fetch used: linked login wins, unique member email is the only fallback). */
-function memberMaps(members: Member[]) {
+ * fetch used: linked login wins, unique member email is the only fallback).
+ * Exported so the per-person report attributes identically to the team report
+ * rather than growing a second, drifting copy of these rules. */
+export function memberMaps(members: Member[]) {
 	const byLogin = new Map(members.map((m) => [m.login.toLowerCase(), m.login]));
 	const tzByLogin = new Map(members.map((m) => [m.login, m.tz]));
 	const emailOwners = new Map<string, Set<string>>();
@@ -65,7 +67,8 @@ function memberMaps(members: Member[]) {
 	return { byLogin, byEmail, tzByLogin };
 }
 
-const commitAuthor = (c: CommitFact) =>
+/** A commit fact in the shape `pickCommitMember` expects. */
+export const commitAuthor = (c: CommitFact) =>
 	({
 		email: c.authorEmail,
 		user: c.authorLogin ? { login: c.authorLogin } : null,

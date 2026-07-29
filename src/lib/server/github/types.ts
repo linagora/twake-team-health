@@ -146,6 +146,85 @@ export type MetricsResult = {
 	generatedAt: number;
 };
 
+// ---- Per-person profile report (one member, over the team's member window) --
+
+/**
+ * One member's window totals. Medians are `null` when the sample behind them is
+ * too small to describe a person rather than a single PR, so the UI can withhold
+ * the number instead of printing a misleading one; `0` always means a real zero.
+ */
+export type PersonTotals = {
+	// Authoring: what they shipped.
+	prsCreated: number;
+	prsMerged: number;
+	prsClosedUnmerged: number;
+	/** merged / (merged + closed unmerged), null when they closed nothing at all
+	 * (no rate exists, which is not the same as a rate of 0%). */
+	mergeRatePct: number | null;
+	/** Median additions + deletions of their merged PRs. */
+	medianPrSize: number | null;
+	/** Median hours from open to merge on their own PRs. */
+	medianCycleHours: number | null;
+	// Reviewing: the review work they did for others.
+	reviewsGiven: number;
+	commentsGiven: number;
+	/** Distinct PRs they reviewed, which submission counts overstate. */
+	prsReviewed: number;
+	approvals: number;
+	changesRequested: number;
+	/** Median hours from a PR opening to their first review on it. Counts only
+	 * PRs opened inside the window, whose review history is fully visible. */
+	medianPickupHours: number | null;
+	// Receiving: the review their own work attracted.
+	reviewsReceived: number;
+	reviewersDistinct: number;
+	/** Median hours their PRs waited for a first human review. Same visibility
+	 * rule as `medianPickupHours`. */
+	medianWaitHours: number | null;
+	/** Their PRs that were opened AND merged inside the window with no human
+	 * review. A PR opened earlier is not counted: it may have been reviewed
+	 * before the window, where the review facts do not reach. */
+	unreviewedMerges: number;
+};
+
+/** One month of a member's activity. Zero-filled across the window so charts
+ * never gap; the medians are null for a month with nothing to measure. */
+export type PersonMonth = {
+	month: string; // YYYY-MM
+	commits: number;
+	prsCreated: number;
+	prsMerged: number;
+	additions: number;
+	deletions: number;
+	reviewsGiven: number;
+	commentsGiven: number;
+	reviewsReceived: number;
+	/** Median open -> merge hours for PRs they merged that month. */
+	cycleHours: number | null;
+	/** Median PR-open -> their-first-review hours for reviews they gave that month. */
+	pickupHours: number | null;
+};
+
+/** A person this member exchanged review with over the window. Counts are review
+ * events (submissions and comments), so they read as "how much back and forth". */
+export type PersonPeer = {
+	login: string;
+	/** Events this member left on the peer's PRs. */
+	given: number;
+	/** Events the peer left on this member's PRs. */
+	received: number;
+};
+
+export type PersonResult = {
+	login: string;
+	totals: PersonTotals;
+	/** Ascending, one row per month of the member window. */
+	byMonth: PersonMonth[];
+	/** Review counterparts, busiest exchange first. */
+	peers: PersonPeer[];
+	generatedAt: number;
+};
+
 // ---- Fact store rows (raw GitHub events; see db/schema.ts for rationale) ----
 export type PrFact = {
 	owner: string;

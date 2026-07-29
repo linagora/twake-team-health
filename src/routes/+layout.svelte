@@ -7,6 +7,7 @@
 	import { metrics, globalMetrics, forceRefresh, selectionFor, type RefreshKind } from '$lib/client/metrics.svelte';
 	import { attention } from '$lib/client/attention.svelte';
 	import { flow } from '$lib/client/flow.svelte';
+	import { person } from '$lib/client/person.svelte';
 	import { page } from '$app/state';
 	import { afterNavigate } from '$app/navigation';
 
@@ -18,13 +19,13 @@
 	// shows (a plain store reload would only re-read the same warm cache), then
 	// reloads the stores to pick up the fresh entries.
 	let forcing = $state(false);
-	const forceThenReload = (kinds: RefreshKind[], reloads: (() => void)[]) => async () => {
+	const forceThenReload = (kinds: RefreshKind[], reloads: (() => void)[], login?: string) => async () => {
 		if (forcing) return;
 		const t = scope.activeTeam ?? data.defaultTeams?.[0];
 		if (!t) return;
 		forcing = true;
 		try {
-			await forceRefresh(selectionFor(t, scope.months, scope.memberMonths, scope.to || undefined), kinds);
+			await forceRefresh(selectionFor(t, scope.months, scope.memberMonths, scope.to || undefined), kinds, login);
 		} catch {
 			// Best-effort: still reload below so the button gives feedback.
 		} finally {
@@ -62,6 +63,20 @@
 			return { loading: metrics.loading || flow.loading, refresh: forceThenReload(['metrics', 'flow'], [() => scope.reload(), () => flow.reload()]) };
 		if (p.startsWith('/global') || p.startsWith('/breakdown'))
 			return { loading: globalMetrics.loading, refresh: forceGlobal };
+		// A profile shows both the team report (commits, burnout) and that member's
+		// own report, so Refresh has to invalidate the two of them together.
+		if (p.startsWith('/people/'))
+			return {
+				loading: metrics.loading || person.loading,
+				refresh: forceThenReload(
+					['metrics', 'person'],
+					[() => scope.reload(), () => person.reload()],
+					// The router's already-decoded param, not the raw pathname: this
+					// runs for every route, and decoding a malformed path here would
+					// throw out of the whole layout rather than just this page.
+					page.params.login
+				)
+			};
 		return { loading: metrics.loading, refresh: forceThenReload(['metrics'], [() => scope.reload()]) };
 	});
 	const loading = $derived(active.loading || forcing);

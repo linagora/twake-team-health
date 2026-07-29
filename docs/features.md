@@ -61,6 +61,20 @@ view is used see the [guide](./guide.md); for the math behind the metrics see
 - Commit attribution by linked GitHub identity, falling back to commit email,
   with ambiguous shared emails dropped.
 - Per-member rollups: commits, merged PRs, lines changed, repositories touched.
+- Member profile with the person's own delivery, review and collaboration record
+  over the selected window:
+  - Delivery: PRs opened, merged and closed unmerged, merge rate, median PR size,
+    median cycle time from open to merge.
+  - Review given: distinct PRs reviewed, approvals versus changes requested,
+    comments left, median pickup from a PR opening to their first review.
+  - Review received: distinct reviewers on their PRs, median wait for a first
+    review, and PRs that merged with no human review at all.
+  - Collaboration: the peers they exchange review with, in both directions.
+  - Monthly trends for commits, pull requests, review activity, cycle time and
+    code volume.
+  - Bots are excluded from every human review number, self-review does not count
+    as review work, and a median is withheld rather than shown when too few PRs
+    back it.
 - Awards that name the standout contributor per dimension (commits, merged PRs,
   reviews, comments, lines, breadth).
 - Org-wide trend with weighted averages across all repos.

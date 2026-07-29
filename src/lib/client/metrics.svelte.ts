@@ -34,14 +34,19 @@ class MetricsStore extends Resource<MetricsResult> {
 export const metrics = new MetricsStore();
 export const globalMetrics = new MetricsStore();
 
-export type RefreshKind = 'metrics' | 'flow' | 'attention';
+export type RefreshKind = 'metrics' | 'flow' | 'attention' | 'person';
 
 /** Force a data refresh for a selection: refetch the fact tail from GitHub now
  * and recompute + re-cache the given report kinds server-side. Callers reload
  * their stores afterwards to pick up the fresh cache. Backs the topbar Refresh
- * so it is never a no-op against a warm cache. */
-export async function forceRefresh(selection: Selection, kinds: RefreshKind[]): Promise<void> {
-	const res = await postJson('/api/refresh', { ...selection, kinds });
+ * so it is never a no-op against a warm cache. `login` names the subject of the
+ * 'person' kind and is ignored by every other kind. */
+export async function forceRefresh(
+	selection: Selection,
+	kinds: RefreshKind[],
+	login?: string,
+): Promise<void> {
+	const res = await postJson('/api/refresh', { ...selection, kinds, ...(login ? { login } : {}) });
 	if (res.status === 401) {
 		redirectToSignIn();
 		throw new Error('unauthorized');
