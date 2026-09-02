@@ -75,12 +75,12 @@ describe('planSync', () => {
 			TODAY,
 			NOW_MS,
 		)!;
-		expect(plan.issueReconcile).toEqual({ updatedSince: '2026-07-02', createdFrom: SPAN });
+		expect(plan.reconcile).toEqual({ updatedSince: '2026-07-02', createdFrom: SPAN });
 	});
 
 	it('first sight needs no reconcile (everything is freshly created-fetched)', () => {
 		const plan = planSync(null, SPAN, ACTIVITY, ACTIVITY, TODAY, NOW_MS)!;
-		expect(plan.issueReconcile).toBeNull();
+		expect(plan.reconcile).toBeNull();
 	});
 
 	it('an expired TTL refreshes even when the watermark day is today', () => {
@@ -114,7 +114,7 @@ describe('planSync', () => {
 		expect(plan.factRanges.at(-1)).toEqual({ s: '2025-12-01', e: '2025-12-31' }); // stops before existing facts
 		expect(plan.activityRanges).toEqual([]); // activity window unchanged
 		expect(plan.hasBackfill).toBe(true); // holes in history: must block
-		expect(plan.issueReconcile).toBeNull(); // not stale: no tail, no reconcile
+		expect(plan.reconcile).toBeNull(); // not stale: no tail, no reconcile
 		expect(plan.next.backfilledFrom).toBe('2025-07-01');
 		expect(plan.next.syncedThrough).toBe(TODAY); // untouched watermark day
 	});

@@ -3,6 +3,7 @@ import {
 	prStatsForMonth,
 	issueStatsForMonth,
 	fetchIssueFactRows,
+	fetchPrFactRows,
 	pickCommitMember,
 	commitLocalTime,
 	classifyCommitTime,
@@ -203,6 +204,38 @@ describe('fetchIssueFactRows', () => {
 				issueType: null,
 			},
 		]);
+	});
+});
+
+describe('fetchPrFactRows', () => {
+	it('reconciles PRs updated since a day: closes without merge and reopens are invisible to the created/closed windows', async () => {
+		// GitHub search does not reliably return unmerged closes (or reopens) under
+		// `closed:`, so a PR closed long after creation only surfaces via `updated:`.
+		const { gql, queries } = fakeIssueGql((q) =>
+			q.includes('updated:>=')
+				? [
+						{
+							number: 9,
+							author: { login: 'alice' },
+							createdAt: '2025-08-01T00:00:00Z',
+							mergedAt: null,
+							closedAt: '2026-07-03T10:00:00Z',
+							additions: 1,
+							deletions: 2,
+							comments: { totalCount: 0 },
+							reviews: { totalCount: 0 },
+						},
+					]
+				: [],
+		);
+		const rows = await fetchPrFactRows(
+			gql,
+			{ owner: 'o', repo: 'r' },
+			[{ s: '2026-07-02', e: '2026-07-05' }],
+			{ updatedSince: '2026-07-02', createdFrom: '2025-07-01' },
+		);
+		expect(queries).toContain('repo:o/r type:pr created:>=2025-07-01 updated:>=2026-07-02');
+		expect(rows.map((r) => [r.number, r.closedAt])).toEqual([[9, new Date('2026-07-03T10:00:00Z')]]);
 	});
 });
 
