@@ -419,11 +419,16 @@ export async function fetchStockAsOf(
 
 const dateOrNull = (iso: string | null | undefined): Date | null => (iso ? new Date(iso) : null);
 
-/** PR facts touched (created or closed/merged) in the given ranges of one repo. */
+/** PR facts touched (created or closed/merged) in the given ranges of one repo.
+ * `reconcile` adds an `updated:`-keyed pass: GitHub search does not reliably
+ * return PRs closed without a merge under `closed:`, and never re-returns a
+ * reopened one, so re-pull anything UPDATED since `updatedSince` (bounded to the
+ * reporting span by `createdFrom`) to catch those state changes. */
 export async function fetchPrFactRows(
 	gql: GraphQL,
 	{ owner, repo }: Repo,
 	ranges: DayRange[],
+	reconcile?: { updatedSince: string; createdFrom: string },
 ): Promise<PrFact[]> {
 	const byNumber = new Map<number, PrFact>();
 	// All (range x created/closed) searches in parallel: the GraphQL client's
@@ -432,6 +437,11 @@ export async function fetchPrFactRows(
 		`repo:${owner}/${repo} type:pr created:${s}..${e}`,
 		`repo:${owner}/${repo} type:pr is:closed closed:${s}..${e}`,
 	]);
+	if (reconcile) {
+		queries.push(
+			`repo:${owner}/${repo} type:pr created:>=${reconcile.createdFrom} updated:>=${reconcile.updatedSince}`,
+		);
+	}
 	const pages = await Promise.all(queries.map((q) => searchAllNodes(gql, q, PR_FACT_FIELDS)));
 	{
 		for (const pr of pages.flat()) {
