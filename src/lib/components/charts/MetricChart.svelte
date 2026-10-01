@@ -5,6 +5,7 @@
 	import type { ChartConfig } from '$lib/components/ui/chart';
 	import { fmtMonth } from '$lib/utils';
 	import { isMonthKey, monthKeyOf } from '$lib/months';
+	import { splitLastSegment } from '$lib/charts';
 	import { printMode } from '$lib/client/print.svelte';
 
 	type Series = { key: string; label: string; color: string };
@@ -92,18 +93,15 @@
 		onAxis && data.length > 1 && (kind === 'line' || (kind === 'area' && seriesLayout !== 'stack'))
 	);
 	const mtdBars = $derived(onAxis && kind === 'bar');
-	type Row = Record<string, unknown>;
 	// Area forwards a series' `defined` prop to its path; LineChart's Spline does
 	// not, so lines take theirs from this map through the `marks` snippet below.
 	const definedBy = $derived.by(() => {
-		const out = new Map<string, (d: Row) => boolean>();
+		const out = new Map<string, (d: Record<string, unknown>) => boolean>();
 		if (!dashMtd) return out;
-		const now = data[data.length - 1][x];
-		const prev = data[data.length - 2][x];
 		for (const s of baseSeries) {
-			const has = (d: Row) => d[s.key] != null;
-			out.set(s.key, (d) => d[x] !== now && has(d));
-			out.set(`${s.key}_mtd`, (d) => (d[x] === now || d[x] === prev) && has(d));
+			const { solid, partial } = splitLastSegment(safeData, x, s.key);
+			out.set(s.key, solid);
+			out.set(`${s.key}_mtd`, partial);
 		}
 		return out;
 	});

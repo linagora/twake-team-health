@@ -348,3 +348,18 @@ export function avgOver(rows: OrgMonth[], key: keyof OrgMonth): number {
 	if (!nums.length) return 0;
 	return nums.reduce((s, v) => s + v, 0) / nums.length;
 }
+
+type Row = Record<string, unknown>;
+
+/** Split a series at its last point: `solid` draws every point but the last,
+ * `partial` draws only the segment from the second-to-last point into the last.
+ * Both skip points where the series has no value. */
+export function splitLastSegment(rows: Row[], x: string, key: string) {
+	const last = rows[rows.length - 1]?.[x];
+	const prev = rows[rows.length - 2]?.[x];
+	const has = (d: Row) => d[key] != null;
+	return {
+		solid: (d: Row) => d[x] !== last && has(d),
+		partial: (d: Row) => (d[x] === last || d[x] === prev) && has(d)
+	};
+}
