@@ -6,7 +6,7 @@ import {
 	reviewActivityChart,
 	ticketsChart
 } from './charts';
-import { commitsByRepoChart, orgTrend, avgOver, botMonthly } from './charts';
+import { commitsByRepoChart, orgTrend, avgOver, botMonthly, splitLastSegment } from './charts';
 import type { AppConfig } from './server/config';
 import type { MetricsResult, RepoMonth } from './server/github/types';
 
@@ -226,5 +226,26 @@ describe('botMonthly', () => {
 		const two = [...rows, { month: '2026-01', login: 'renovate[bot]', comments: 7, reviews: 0 }];
 		const { data } = botMonthly(two, ['2026-01', '2026-03'], 'comments');
 		expect(data[1]['renovate[bot]']).toBe(0);
+	});
+});
+
+describe('splitLastSegment', () => {
+	const rows = [
+		{ month: '2026-08', prs: 4 },
+		{ month: '2026-09', prs: 6 },
+		{ month: '2026-10', prs: 1 }
+	];
+
+	it('draws the solid line up to the previous month and the partial line from there', () => {
+		const { solid, partial } = splitLastSegment(rows, 'month', 'prs');
+		expect(rows.map(solid)).toEqual([true, true, false]);
+		expect(rows.map(partial)).toEqual([false, true, true]);
+	});
+
+	it('leaves a gap where the series has no value', () => {
+		const gappy = [{ month: '2026-09', prs: null }, rows[2]];
+		const { solid, partial } = splitLastSegment(gappy, 'month', 'prs');
+		expect(gappy.map(solid)).toEqual([false, false]);
+		expect(gappy.map(partial)).toEqual([false, true]);
 	});
 });

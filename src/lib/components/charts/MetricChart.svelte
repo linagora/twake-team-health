@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { BarChart, LineChart, AreaChart } from 'layerchart';
+	import { BarChart, LineChart, AreaChart, Spline } from 'layerchart';
 	import { curveMonotoneX } from 'd3-shape';
 	import * as Chart from '$lib/components/ui/chart';
 	import type { ChartConfig } from '$lib/components/ui/chart';
 	import { fmtMonth } from '$lib/utils';
 	import { isMonthKey, monthKeyOf } from '$lib/months';
+	import { splitLastSegment } from '$lib/charts';
 	import { printMode } from '$lib/client/print.svelte';
 
 	type Series = { key: string; label: string; color: string };
@@ -59,7 +60,7 @@
 	const config = $derived(
 		Object.fromEntries(series.map((s, i) => [`__s${i}`, { label: s.label, color: s.color }])) as ChartConfig
 	);
-	const lcSeries = $derived(
+	const baseSeries = $derived(
 		series.map((s, i) => ({ key: `__s${i}`, label: s.label, color: `var(--color-__s${i})` }))
 	);
 	const safeData = $derived(
@@ -78,11 +79,45 @@
 	// not captured at init, so a dashboard left open across a month boundary moves
 	// the note onto the new month when the refreshed data arrives instead of
 	// stranding it on a month that has since completed.
+	const onAxis = $derived(data.length > 0 && data[data.length - 1]?.[x] === monthKeyOf());
 	const partialMonth = $derived.by(() => {
 		const now = monthKeyOf();
-		const trailingX = data.length > 0 ? data[data.length - 1]?.[x] : undefined;
-		const onAxis = isMonthKey(trailingX) && trailingX === now;
 		return onAxis || series.some((s) => s.key === now) ? now : null;
+	});
+
+	// Month to date on a month axis: the last segment is drawn dashed so a partial
+	// month doesn't read as a collapse. Each line gets a `_mtd` twin defined only on
+	// that segment; twins stay out of `config`, which keeps them out of the tooltip.
+	// Stacked areas are skipped (a twin would stack on its own series).
+	const dashMtd = $derived(
+		onAxis && data.length > 1 && (kind === 'line' || (kind === 'area' && seriesLayout !== 'stack'))
+	);
+	const mtdBars = $derived(onAxis && kind === 'bar');
+	// Area forwards a series' `defined` prop to its path; LineChart's Spline does
+	// not, so lines take theirs from this map through the `marks` snippet below.
+	const definedBy = $derived.by(() => {
+		const out = new Map<string, (d: Record<string, unknown>) => boolean>();
+		if (!dashMtd) return out;
+		for (const s of baseSeries) {
+			const { solid, partial } = splitLastSegment(safeData, x, s.key);
+			out.set(s.key, solid);
+			out.set(`${s.key}_mtd`, partial);
+		}
+		return out;
+	});
+	const lcSeries = $derived.by(() => {
+		if (mtdBars) return baseSeries.map((s) => ({ ...s, props: { stroke: s.color } }));
+		if (!dashMtd) return baseSeries;
+		const dash = { 'stroke-dasharray': '4 3' };
+		const style = kind === 'line' ? dash : { 'fill-opacity': 0.06, line: { class: 'stroke-2', ...dash } };
+		const defined = (key: string) => (kind === 'area' ? { defined: definedBy.get(key) } : {});
+		return baseSeries.flatMap((s) => {
+			const twin = `${s.key}_mtd`;
+			return [
+				{ ...s, props: defined(s.key) },
+				{ ...s, key: twin, value: s.key, props: { ...defined(twin), ...style } }
+			];
+		});
 	});
 
 	const tickLabel = { class: 'fill-[var(--color-ink-600)] text-[10px]' };
@@ -111,7 +146,7 @@
 	}
 </script>
 
-<div class="flex flex-col gap-3" use:inView>
+<div class="flex flex-col gap-3" class:mtd-bars={mtdBars} use:inView>
 	{#if legend && series.length > 1}
 		<div class="flex flex-wrap items-center gap-x-5 gap-y-1.5">
 			{#each series as s (s.key)}
@@ -166,10 +201,14 @@
 				grid={{ y: true, x: false }}
 				props={{
 					...axisProps,
-					spline: { curve: curveMonotoneX, class: 'stroke-2' },
 					highlight: { points: { r: 3 } }
 				}}
 			>
+				{#snippet marks({ context })}
+					{#each context.series.visibleSeries as s (s.key)}
+						<Spline seriesKey={s.key} curve={curveMonotoneX} class="stroke-2" defined={definedBy.get(s.key)} />
+					{/each}
+				{/snippet}
 				{#snippet tooltip()}
 					<Chart.Tooltip indicator="line" />
 				{/snippet}
@@ -182,7 +221,18 @@
 
 	{#if partialMonth}
 		<p class="text-[10px] text-[var(--color-ink-500)]">
-			{fmtMonth(partialMonth)} is still in progress
+			{fmtMonth(partialMonth)} is still in progress{dashMtd || mtdBars ? ' (month to date, dashed)' : ''}
 		</p>
 	{/if}
 </div>
+
+<style>
+	.mtd-bars :global(.lc-bars > .lc-bar:not(:last-child)) {
+		stroke: none;
+	}
+	.mtd-bars :global(.lc-bars > .lc-bar:last-child) {
+		stroke-width: 1.5px;
+		stroke-dasharray: 3 2;
+		fill-opacity: 0.25;
+	}
+</style>
