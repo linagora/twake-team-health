@@ -51,9 +51,12 @@
 	const chartCtx = getChartContext();
 
 	// Filter to series with defined values (important for item-based charts like Pie/Arc
-	// where only the hovered item has a value)
+	// where only the hovered item has a value). Series missing from the config are
+	// drawing aids, like MetricChart's dashed month-to-date twins.
 	const visibleSeries = $derived(
-		chartCtx.tooltip.series.filter((s: TooltipPayload) => s.value !== undefined)
+		chartCtx.tooltip.series.filter(
+			(s: TooltipPayload) => s.value !== undefined && s.key in chart.config
+		)
 	);
 
 	const formattedLabel = $derived.by(() => {
