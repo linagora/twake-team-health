@@ -3,14 +3,7 @@ import { getMetrics } from './metrics-cache';
 import { getFlowReport } from './flow';
 import { getAttention } from './attention-cache';
 import { pruneEvents } from './store/audit';
-import {
-	defaultTeams,
-	defaultGlobalRepos,
-	defaultSelection,
-	GLOBAL_MONTHS,
-	DEFAULT_MONTHS,
-	DEFAULT_MEMBER_MONTHS,
-} from './preset';
+import { resolveDefaultTeams, defaultSelection } from './preset';
 import { getAppSettings } from './app-config';
 import { computeSignals, scopeKey } from '$lib/signals';
 import { upsertSignalSnapshots } from './signal-history';
@@ -39,13 +32,16 @@ export type WarmResult = {
  * Sequential on purpose: warming must not itself burst into a secondary rate limit.
  */
 export async function warmAll(): Promise<WarmResult> {
-	const teams = defaultTeams();
-	const globalRepos = defaultGlobalRepos();
+	// The same team and global lists the pages are served (UI edits included), not
+	// just the env presets, so repos added in the app are kept warm too.
+	const teams = await resolveDefaultTeams();
+	const settings = await getAppSettings();
+	const globalRepos = settings.globalRepos;
 	// Resolve each member's effective timezone (own override, else team default)
 	// before deduping, so global burnout is also classified in local time.
 	const allMembers = dedupeMembers(teams.flatMap((t) => withTeamTz(t.members, t.tz)));
 	const allRepos = dedupeRepos([...globalRepos, ...teams.flatMap((t) => t.repos)]);
-	const targets = (await getAppSettings()).signals;
+	const targets = settings.signals;
 
 	// Warm a scope's metrics + flow, then snapshot today's signals (the rolling
 	// flow checks plus the metrics-derived ones) for its history timeline, so the
@@ -71,8 +67,8 @@ export async function warmAll(): Promise<WarmResult> {
 				warmScope({
 					repos: t.repos,
 					members: withTeamTz(t.members, t.tz),
-					months: DEFAULT_MONTHS,
-					memberMonths: DEFAULT_MEMBER_MONTHS,
+					months: settings.defaultMonths,
+					memberMonths: settings.defaultMemberMonths,
 				} satisfies Selection),
 		})),
 		{
@@ -81,8 +77,8 @@ export async function warmAll(): Promise<WarmResult> {
 				warmScope({
 					repos: globalRepos,
 					members: allMembers,
-					months: GLOBAL_MONTHS,
-					memberMonths: DEFAULT_MEMBER_MONTHS,
+					months: settings.globalMonths,
+					memberMonths: settings.defaultMemberMonths,
 				} satisfies Selection),
 		},
 		{ label: 'default', run: () => warmScope(defaultSelection()) },
