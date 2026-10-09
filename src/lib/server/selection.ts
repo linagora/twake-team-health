@@ -1,10 +1,8 @@
 import type { Repo, Selection } from './github/types';
-import { parseMembers, parseRepos } from './validate';
+import { MAX_REPOS, parseMembers, parseRepos } from './validate';
 import { allowedOrgs } from './discovery';
 import { isMonthKey } from '$lib/months';
 
-// Matches the cap a saved team accepts, so a saved team always reports in full.
-const MAX_REPOS = 100;
 const MAX_MEMBERS = 60;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(n)));
 // Coerce to a finite number, else the default (a non-numeric `months` must not

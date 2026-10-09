@@ -6,7 +6,7 @@ import { env } from '$env/dynamic/private';
 import { eq } from 'drizzle-orm';
 import { db, hasDb } from './db';
 import { appConfig } from './db/schema';
-import { parseRepos } from './validate';
+import { MAX_REPOS, parseRepos } from './validate';
 import { allowedOrgs } from './discovery';
 import { DEFAULT_MONTHS, DEFAULT_MEMBER_MONTHS, GLOBAL_MONTHS, defaultGlobalRepos } from './preset';
 import { DEFAULT_TARGETS, type Targets } from '$lib/signals';
@@ -34,7 +34,6 @@ export type AppSettings = {
 };
 
 const CONFIG_ID = 'app';
-const MAX_GLOBAL_REPOS = 100;
 const TTL_MS = 60_000;
 let cache: { value: AppSettings; expires: number } | null = null;
 
@@ -97,7 +96,7 @@ function cleanNames(xs: unknown[]): string[] {
 function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	const out: Partial<AppSettings> = {};
 	if (Array.isArray(o.globalRepos)) {
-		const repos = parseRepos(o.globalRepos, MAX_GLOBAL_REPOS, allowedOrgs());
+		const repos = parseRepos(o.globalRepos, MAX_REPOS, allowedOrgs());
 		if (repos.length) out.globalRepos = repos;
 	}
 	const gm = months(o.globalMonths);

@@ -7,6 +7,10 @@ const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/; // org/user/member login
 const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s"<>\\]{1,254}$/;
 
+// One cap for every repo list (saved team, global repos, report selection), so a
+// list that can be saved can always be reported in full.
+export const MAX_REPOS = 100;
+
 const isLogin = (s: unknown): s is string => typeof s === 'string' && LOGIN_RE.test(s);
 const isRepoName = (s: unknown): s is string => typeof s === 'string' && REPO_RE.test(s);
 
