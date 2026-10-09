@@ -32,8 +32,7 @@ export type WarmResult = {
  * Sequential on purpose: warming must not itself burst into a secondary rate limit.
  */
 export async function warmAll(): Promise<WarmResult> {
-	// The same team and global lists the pages are served (UI edits included), not
-	// just the env presets, so repos added in the app are kept warm too.
+	// The lists the pages serve, UI edits included, so repos added in the app stay warm.
 	const teams = await resolveDefaultTeams();
 	const settings = await getAppSettings();
 	const globalRepos = settings.globalRepos;
