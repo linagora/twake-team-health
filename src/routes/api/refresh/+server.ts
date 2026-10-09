@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let login: string | undefined;
 	try {
 		const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-		selection = parseSelection(body);
+		selection = parseSelection(body, await getAppSettings());
 		const requested = Array.isArray(body.kinds) ? body.kinds : ['metrics'];
 		kinds = KINDS.filter((k) => requested.includes(k));
 		if (!kinds.length) kinds = ['metrics'];

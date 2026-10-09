@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { getFlow } from '$lib/server/flow-cache';
 import { parseRepoSelection } from '$lib/server/selection';
+import { getAppSettings } from '$lib/server/app-config';
 import { isMonthKey } from '$lib/months';
 import { throwUpstreamError } from '$lib/server/api-errors';
 import { audit } from '$lib/server/store/audit';
@@ -12,7 +13,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let to: string | undefined;
 	try {
 		const body = await request.json().catch(() => ({}));
-		repos = parseRepoSelection(body);
+		repos = parseRepoSelection(body, (await getAppSettings()).maxRepos);
 		const n = Math.round(Number((body as { months?: number }).months ?? 12));
 		months = Number.isFinite(n) ? Math.max(1, Math.min(24, n)) : 12;
 		const rawTo = (body as { to?: unknown }).to;

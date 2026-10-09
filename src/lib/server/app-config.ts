@@ -24,6 +24,10 @@ export type AppSettings = {
 	attentionAgingDays: number;
 	// Max in-flight GitHub GraphQL calls (lower = gentler on the rate limit).
 	fetchConcurrency: number;
+	// Largest team or report selection accepted. Every repo costs GitHub calls on
+	// the shared token, so this bounds what one request can spend.
+	maxRepos: number;
+	maxMembers: number;
 	// Optional organization name shown in the sidebar brand.
 	orgName: string;
 	// Label names that mark an issue as a bug, added on top of the default
@@ -34,8 +38,9 @@ export type AppSettings = {
 };
 
 const CONFIG_ID = 'app';
-const MAX_GLOBAL_REPOS = 100;
 const TTL_MS = 60_000;
+export const MAX_REPOS_CEILING = 300;
+export const MAX_MEMBERS_CEILING = 500;
 let cache: { value: AppSettings; expires: number } | null = null;
 
 function envSettings(): AppSettings {
@@ -48,6 +53,8 @@ function envSettings(): AppSettings {
 		attentionStaleDays: days(env.ATTENTION_STALE_DAYS) ?? 7,
 		attentionAgingDays: days(env.ATTENTION_AGING_DAYS) ?? 14,
 		fetchConcurrency: Number(env.GITHUB_MAX_CONCURRENCY) || 8,
+		maxRepos: 100,
+		maxMembers: 200,
 		orgName: env.ORG_NAME ?? '',
 		bugLabels: [],
 		bugIssueTypes: []
@@ -97,7 +104,7 @@ function cleanNames(xs: unknown[]): string[] {
 function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	const out: Partial<AppSettings> = {};
 	if (Array.isArray(o.globalRepos)) {
-		const repos = parseRepos(o.globalRepos, MAX_GLOBAL_REPOS, allowedOrgs());
+		const repos = parseRepos(o.globalRepos, MAX_REPOS_CEILING, allowedOrgs());
 		if (repos.length) out.globalRepos = repos;
 	}
 	const gm = months(o.globalMonths);
@@ -114,6 +121,10 @@ function sanitize(o: Record<string, unknown>): Partial<AppSettings> {
 	if (ad) out.attentionAgingDays = ad;
 	const fc = Number(o.fetchConcurrency);
 	if (Number.isInteger(fc) && fc >= 1 && fc <= 32) out.fetchConcurrency = fc;
+	const mr = Number(o.maxRepos);
+	const mb = Number(o.maxMembers);
+	if (Number.isInteger(mr) && mr >= 1 && mr <= MAX_REPOS_CEILING) out.maxRepos = mr;
+	if (Number.isInteger(mb) && mb >= 1 && mb <= MAX_MEMBERS_CEILING) out.maxMembers = mb;
 	if (typeof o.orgName === 'string') out.orgName = o.orgName.trim().slice(0, 60);
 	if (Array.isArray(o.bugLabels)) out.bugLabels = cleanNames(o.bugLabels);
 	if (Array.isArray(o.bugIssueTypes)) out.bugIssueTypes = cleanNames(o.bugIssueTypes);
@@ -154,6 +165,11 @@ export async function setAppSettings(patch: Record<string, unknown>): Promise<Ap
 	const [row] = await db().select().from(appConfig).where(eq(appConfig.id, CONFIG_ID));
 	const existing = (row?.value as Record<string, unknown>) ?? {};
 	const merged = sanitize({ ...existing, ...patch });
+	// The Global view is a report selection too: refuse a list it could not load.
+	const maxRepos = merged.maxRepos ?? envSettings().maxRepos;
+	if (merged.globalRepos && merged.globalRepos.length > maxRepos) {
+		throw new Error(`${merged.globalRepos.length} global repositories exceed the limit of ${maxRepos}`);
+	}
 	await db()
 		.insert(appConfig)
 		.values({ id: CONFIG_ID, value: merged })

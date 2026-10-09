@@ -92,6 +92,8 @@
 	let attentionStaleDays = $state(s.attentionStaleDays);
 	let attentionAgingDays = $state(s.attentionAgingDays);
 	let fetchConcurrency = $state(s.fetchConcurrency);
+	let maxRepos = $state(s.maxRepos);
+	let maxMembers = $state(s.maxMembers);
 	let orgName = $state(s.orgName);
 	let bugLabels = $state(s.bugLabels.join(', '));
 	let bugIssueTypes = $state(s.bugIssueTypes.join(', '));
@@ -160,6 +162,8 @@
 				attentionStaleDays = sv.attentionStaleDays;
 				attentionAgingDays = sv.attentionAgingDays;
 				fetchConcurrency = sv.fetchConcurrency;
+				maxRepos = sv.maxRepos;
+				maxMembers = sv.maxMembers;
 				orgName = sv.orgName;
 				bugLabels = (sv.bugLabels ?? []).join(', ');
 				bugIssueTypes = (sv.bugIssueTypes ?? []).join(', ');
@@ -347,11 +351,20 @@
 			</div>
 			<p class="mt-1.5 text-xs text-[var(--color-ink-600)]">
 				Max simultaneous GitHub calls. Lower is gentler on the rate limit; raise it for speed.
+				The team limits apply to every team and report; a larger one is refused, not cut short.
 			</p>
 			<div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<label class="block">
 					<span class="eyebrow mb-2 block">Fetch concurrency (1–32)</span>
 					<input class={inputCls} type="number" name="fetchConcurrency" min="1" max="32" bind:value={fetchConcurrency} />
+				</label>
+				<label class="block">
+					<span class="eyebrow mb-2 block">Max repos per team (1–300)</span>
+					<input class={inputCls} type="number" name="maxRepos" min="1" max="300" bind:value={maxRepos} />
+				</label>
+				<label class="block">
+					<span class="eyebrow mb-2 block">Max members per team (1–500)</span>
+					<input class={inputCls} type="number" name="maxMembers" min="1" max="500" bind:value={maxMembers} />
 				</label>
 			</div>
 		</Card.Root>

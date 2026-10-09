@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!isAdmin(locals.user)) throw error(403, 'admins only');
 	let repos;
 	try {
-		repos = parseRepoSelection(await request.json().catch(() => ({})));
+		repos = parseRepoSelection(await request.json().catch(() => ({})), (await getAppSettings()).maxRepos);
 	} catch (e) {
 		throw error(400, (e as Error).message);
 	}

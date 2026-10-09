@@ -3,6 +3,7 @@ import { hasDb } from '$lib/server/db';
 import { defaultTeams, clearDefaultTeamsCache } from '$lib/server/preset';
 import { upsertDefaultTeamOverride, deleteDefaultTeamOverride } from '$lib/server/store/default-teams';
 import { parseTeamInput } from '$lib/server/teamInput';
+import { getAppSettings } from '$lib/server/app-config';
 import { audit } from '$lib/server/store/audit';
 import type { RequestHandler } from './$types';
 
@@ -17,7 +18,7 @@ export const PUT: RequestHandler = async ({ locals, request, params }) => {
 	if (!preset(params.id)) throw error(404, 'Unknown default team');
 	let input;
 	try {
-		input = parseTeamInput(await request.json().catch(() => ({})));
+		input = parseTeamInput(await request.json().catch(() => ({})), await getAppSettings());
 	} catch (e) {
 		throw error(400, (e as Error).message);
 	}

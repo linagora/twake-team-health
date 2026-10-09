@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { getPerson } from '$lib/server/person-cache';
 import { parseSelection } from '$lib/server/selection';
+import { getAppSettings } from '$lib/server/app-config';
 import { throwUpstreamError } from '$lib/server/api-errors';
 import { audit } from '$lib/server/store/audit';
 import type { RequestHandler } from './$types';
@@ -10,7 +11,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let login: string;
 	try {
 		const body = await request.json().catch(() => ({}));
-		selection = parseSelection(body);
+		selection = parseSelection(body, await getAppSettings());
 		const raw = (body as { login?: unknown }).login;
 		// The subject must be a member of the submitted roster, which parseSelection
 		// has already shape-validated. This is a sanitization guard, not an

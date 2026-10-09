@@ -52,6 +52,8 @@ export const actions: Actions = {
 				attentionStaleDays: num('attentionStaleDays'),
 				attentionAgingDays: num('attentionAgingDays'),
 				fetchConcurrency: num('fetchConcurrency'),
+				maxRepos: num('maxRepos'),
+				maxMembers: num('maxMembers'),
 				orgName: String(fd.get('orgName') ?? ''),
 				bugLabels: list('bugLabels'),
 				bugIssueTypes: list('bugIssueTypes'),
