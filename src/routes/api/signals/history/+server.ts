@@ -1,5 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { parseRepoSelection } from '$lib/server/selection';
+import { getAppSettings } from '$lib/server/app-config';
 import { getSignalHistory } from '$lib/server/signal-history';
 import { audit } from '$lib/server/store/audit';
 import { scopeKey } from '$lib/signals';
@@ -13,7 +14,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let repos;
 	try {
 		const body = await request.json().catch(() => ({}));
-		repos = parseRepoSelection(body);
+		repos = parseRepoSelection(body, (await getAppSettings()).maxRepos);
 	} catch (e) {
 		throw error(400, (e as Error).message);
 	}

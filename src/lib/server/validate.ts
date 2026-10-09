@@ -7,9 +7,9 @@ const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/; // org/user/member login
 const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const EMAIL_RE = /^[^\s"<>\\]{1,254}$/;
 
-// One cap for every repo list (saved team, global repos, report selection), so a
-// list that can be saved can always be reported in full.
-export const MAX_REPOS = 100;
+// Admin-configured caps applied alike to saved teams and report selections, so a
+// team that can be saved can always be reported in full.
+export type ListLimits = { maxRepos: number; maxMembers: number };
 
 const isLogin = (s: unknown): s is string => typeof s === 'string' && LOGIN_RE.test(s);
 const isRepoName = (s: unknown): s is string => typeof s === 'string' && REPO_RE.test(s);
@@ -53,4 +53,21 @@ export function parseRepos(value: unknown, cap: number, allowed?: string[]): Rep
 		if (out.length >= cap) break;
 	}
 	return out;
+}
+
+// The limited* parsers throw rather than truncate: a silently dropped tail looks
+// like missing activity.
+const overLimit = (max: number, what: string, got: number) =>
+	new Error(`limited to ${max} ${what} (got ${got}); an admin can raise it in Settings`);
+
+export function limitedRepos(value: unknown, max: number, allowed?: string[]): Repo[] {
+	const repos = parseRepos(value, Infinity, allowed);
+	if (repos.length > max) throw overLimit(max, 'repositories', repos.length);
+	return repos;
+}
+
+export function limitedMembers(value: unknown, max: number): Member[] {
+	const members = parseMembers(value, Infinity);
+	if (members.length > max) throw overLimit(max, 'members', members.length);
+	return members;
 }

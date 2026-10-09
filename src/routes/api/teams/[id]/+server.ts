@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { hasDb } from '$lib/server/db';
 import { updateUserTeam, deleteUserTeam } from '$lib/server/store/teams';
 import { parseTeamInput } from '$lib/server/teamInput';
+import { getAppSettings } from '$lib/server/app-config';
 import { audit } from '$lib/server/store/audit';
 import type { RequestHandler } from './$types';
 
@@ -9,7 +10,7 @@ export const PUT: RequestHandler = async ({ locals, request, params }) => {
 	if (!hasDb()) throw error(501, 'Team persistence is not configured');
 	let input;
 	try {
-		input = parseTeamInput(await request.json().catch(() => ({})));
+		input = parseTeamInput(await request.json().catch(() => ({})), await getAppSettings());
 	} catch (e) {
 		throw error(400, (e as Error).message);
 	}
